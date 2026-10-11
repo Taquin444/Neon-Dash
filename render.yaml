@@ -3,8 +3,8 @@ services:
     name: neon-dash-server
     runtime: node
     plan: free
-    buildCommand: npm install
-    startCommand: npm start
+    buildCommand: npm install --legacy-peer-deps && VITE_CONFIG_NATIVE_IGNORE_WARNING=true TSC_COMPILE_ON_ERROR=true npm run build
+    startCommand: node dist/server/server.js
     envVars:
       - key: NODE_ENV
         value: production
