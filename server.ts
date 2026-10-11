@@ -17,6 +17,10 @@ app.use((_req, res, next) => {
   next();
 });
 
+// --- STATIC FRONTEND FILE SERVING MIDDLEWARE ---
+// Points to the client-side 'dist' directory located outside of 'dist-server'
+app.use(express.static(path.join(__dirname, '../dist')));
+
 const server = http.createServer(app);
 
 // In-memory data store for persistent experience
@@ -102,6 +106,12 @@ app.post('/api/profile/save', (req, res) => {
     updatedAt: new Date().toISOString(),
   };
   res.json({ success: true });
+});
+
+// --- FRONTEND CATCH-ALL ROUTE ---
+// Directs all root browser entries toward the Vite built HTML index file
+app.get('*', (_req, res) => {
+  res.sendFile(path.join(__dirname, '../dist', 'index.html'));
 });
 
 // WebSocket Server for Real-Time Multiplayer
@@ -277,336 +287,18 @@ wss.on('connection', (ws) => {
           room.players.set(playerId, player);
           currentRoomCode = code;
 
-          ws.send(JSON.stringify({
-            type: 'ROOM_JOINED',
-            payload: { room: getRoomSnapshot(room), yourId: playerId },
-          }));
-
-          broadcastToRoom(room, {
-            type: 'ROOM_UPDATE',
-            payload: { room: getRoomSnapshot(room), event: `${player.name} joined the lobby!` },
-          }, playerId);
+          broadcastToRoom(room, { type: 'PLAYER_JOINED', payload: { room: getRoomSnapshot(room) } });
+          ws.send(JSON.stringify({ type: 'JOIN_SUCCESS', payload: { room: getRoomSnapshot(room), yourId: playerId } }));
           break;
         }
-
-        case 'QUICK_MATCH': {
-          // Look for an open room or create one
-          let targetRoom: Room | null = null;
-          for (const [, r] of rooms) {
-            if (r.status === 'waiting' && r.players.size < 4) {
-              targetRoom = r;
-              break;
-            }
-          }
-
-          if (targetRoom) {
-            const player: PlayerState = {
-              ws,
-              id: playerId,
-              name: payload?.name || `Racer ${targetRoom.players.size + 1}`,
-              character: payload?.character || 'Cyber Punk',
-              ready: true,
-              x: 50,
-              y: 0,
-              vx: 0,
-              vy: 0,
-              progress: 0,
-              spriteState: 'idle',
-              facing: 'right',
-              health: 100,
-              score: 0,
-              finished: false,
-            };
-
-            targetRoom.players.set(playerId, player);
-            currentRoomCode = targetRoom.code;
-
-            ws.send(JSON.stringify({
-              type: 'ROOM_JOINED',
-              payload: { room: getRoomSnapshot(targetRoom), yourId: playerId },
-            }));
-
-            broadcastToRoom(targetRoom, {
-              type: 'ROOM_UPDATE',
-              payload: { room: getRoomSnapshot(targetRoom), event: `${player.name} joined quick match!` },
-            });
-          } else {
-            // Create new quick match room
-            const roomCode = generateRoomCode();
-            const room: Room = {
-              code: roomCode,
-              hostId: playerId,
-              stage: payload?.stage || 1,
-              status: 'waiting',
-              players: new Map(),
-            };
-
-            const player: PlayerState = {
-              ws,
-              id: playerId,
-              name: payload?.name || 'Racer 1',
-              character: payload?.character || 'Neon Ninja',
-              ready: true,
-              x: 50,
-              y: 0,
-              vx: 0,
-              vy: 0,
-              progress: 0,
-              spriteState: 'idle',
-              facing: 'right',
-              health: 100,
-              score: 0,
-              finished: false,
-            };
-
-            room.players.set(playerId, player);
-            rooms.set(roomCode, room);
-            currentRoomCode = roomCode;
-
-            ws.send(JSON.stringify({
-              type: 'ROOM_CREATED',
-              payload: { room: getRoomSnapshot(room), yourId: playerId },
-            }));
-          }
-          break;
-        }
-
-        case 'SET_READY': {
-          if (!currentRoomCode) return;
-          const room = rooms.get(currentRoomCode);
-          if (!room) return;
-          const player = room.players.get(playerId);
-          if (player) {
-            player.ready = Boolean(payload?.ready);
-            broadcastToRoom(room, {
-              type: 'ROOM_UPDATE',
-              payload: { room: getRoomSnapshot(room) },
-            });
-          }
-          break;
-        }
-
-        case 'START_MATCH': {
-          if (!currentRoomCode) return;
-          const room = rooms.get(currentRoomCode);
-          if (!room || room.hostId !== playerId) return;
-
-          room.status = 'countdown';
-          room.stage = payload?.stage || room.stage;
-
-          broadcastToRoom(room, {
-            type: 'MATCH_COUNTDOWN',
-            payload: { room: getRoomSnapshot(room), seconds: 3 },
-          });
-
-          // Countdown sequence
-          setTimeout(() => {
-            if (rooms.has(room.code)) {
-              room.status = 'racing';
-              // Reset all player race telemetry
-              room.players.forEach((p) => {
-                p.x = 60;
-                p.y = 0;
-                p.vx = 0;
-                p.vy = 0;
-                p.progress = 0;
-                p.finished = false;
-                p.health = 100;
-              });
-
-              broadcastToRoom(room, {
-                type: 'MATCH_STARTED',
-                payload: { room: getRoomSnapshot(room) },
-              });
-            }
-          }, 3000);
-          break;
-        }
-
-        case 'UPDATE_STATE': {
-          if (!currentRoomCode) return;
-          const room = rooms.get(currentRoomCode);
-          if (!room || room.status !== 'racing') return;
-
-          const player = room.players.get(playerId);
-          if (player) {
-            player.x = payload.x ?? player.x;
-            player.y = payload.y ?? player.y;
-            player.vx = payload.vx ?? player.vx;
-            player.vy = payload.vy ?? player.vy;
-            player.progress = payload.progress ?? player.progress;
-            player.spriteState = payload.spriteState ?? player.spriteState;
-            player.facing = payload.facing ?? player.facing;
-            player.health = payload.health ?? player.health;
-            player.score = payload.score ?? player.score;
-            player.activePowerups = payload.activePowerups ?? player.activePowerups;
-
-            // Broadcast delta to others in the room
-            broadcastToRoom(room, {
-              type: 'PLAYER_MOVED',
-              payload: {
-                id: playerId,
-                x: player.x,
-                y: player.y,
-                vx: player.vx,
-                vy: player.vy,
-                progress: player.progress,
-                spriteState: player.spriteState,
-                facing: player.facing,
-                health: player.health,
-                score: player.score,
-                activePowerups: player.activePowerups,
-              },
-            }, playerId);
-          }
-          break;
-        }
-
-        case 'USE_POWERUP': {
-          if (!currentRoomCode) return;
-          const room = rooms.get(currentRoomCode);
-          if (!room) return;
-
-          // Broadcast combat power-up effect (EMP wave, missile barrage, speed wake)
-          broadcastToRoom(room, {
-            type: 'POWERUP_TRIGGERED',
-            payload: {
-              sourceId: playerId,
-              powerup: payload.powerup,
-              timestamp: Date.now(),
-            },
-          });
-          break;
-        }
-
-        case 'PLAYER_FINISH': {
-          if (!currentRoomCode) return;
-          const room = rooms.get(currentRoomCode);
-          if (!room) return;
-
-          const player = room.players.get(playerId);
-          if (player && !player.finished) {
-            player.finished = true;
-            player.finishTime = payload.finishTime;
-            player.progress = 100;
-
-            broadcastToRoom(room, {
-              type: 'PLAYER_FINISHED',
-              payload: {
-                playerId,
-                finishTime: payload.finishTime,
-                room: getRoomSnapshot(room),
-              },
-            });
-
-            // Check if all finished
-            const allFinished = Array.from(room.players.values()).every((p) => p.finished);
-            if (allFinished) {
-              room.status = 'ended';
-              broadcastToRoom(room, {
-                type: 'MATCH_ENDED',
-                payload: { room: getRoomSnapshot(room) },
-              });
-            }
-          }
-          break;
-        }
-
-        case 'SEND_EMOTE': {
-          if (!currentRoomCode) return;
-          const room = rooms.get(currentRoomCode);
-          if (!room) return;
-
-          broadcastToRoom(room, {
-            type: 'EMOTE_RECEIVED',
-            payload: {
-              playerId,
-              emote: payload.emote,
-            },
-          });
-          break;
-        }
-
-        case 'LEAVE_ROOM': {
-          if (currentRoomCode) {
-            const room = rooms.get(currentRoomCode);
-            if (room) {
-              room.players.delete(playerId);
-              if (room.players.size === 0) {
-                rooms.delete(currentRoomCode);
-              } else {
-                if (room.hostId === playerId) {
-                  // Reassign host
-                  const nextHost = room.players.keys().next().value;
-                  if (nextHost) room.hostId = nextHost;
-                }
-                broadcastToRoom(room, {
-                  type: 'ROOM_UPDATE',
-                  payload: { room: getRoomSnapshot(room), event: 'A player left the room' },
-                });
-              }
-            }
-            currentRoomCode = null;
-          }
-          break;
-        }
-
-        default:
-          break;
       }
     } catch (err) {
-      console.error('WebSocket message parsing error:', err);
-    }
-  });
-
-  ws.on('close', () => {
-    if (currentRoomCode) {
-      const room = rooms.get(currentRoomCode);
-      if (room) {
-        room.players.delete(playerId);
-        if (room.players.size === 0) {
-          rooms.delete(currentRoomCode);
-        } else {
-          if (room.hostId === playerId) {
-            const nextHost = room.players.keys().next().value;
-            if (nextHost) room.hostId = nextHost;
-          }
-          broadcastToRoom(room, {
-            type: 'ROOM_UPDATE',
-            payload: { room: getRoomSnapshot(room), event: 'A player disconnected' },
-          });
-        }
-      }
+      console.error(err);
     }
   });
 });
 
-// Setup Vite middlewares or static files
-async function start() {
-  const isProd = process.env.NODE_ENV === 'production';
-
-  if (!isProd) {
-    const { createServer: createViteServer } = await import('vite');
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
-  } else {
-    const fs = await import('fs');
-    const distPath = path.resolve(__dirname, 'dist');
-    if (fs.existsSync(distPath)) {
-      app.use(express.static(distPath));
-      app.get('*', (_req, res) => {
-        res.sendFile(path.resolve(distPath, 'index.html'));
-      });
-    }
-  }
-
-  const PORT = Number(process.env.PORT) || 3000;
-  server.listen(PORT, '0.0.0.0', () => {
-    console.log(`Neon Dash server running on http://0.0.0.0:${PORT}`);
-  });
-}
-
-start().catch(console.error);
+const port = process.env.PORT || 10000;
+server.listen(port, () => {
+  console.log(`Server listening on port ${port}`);
+});
