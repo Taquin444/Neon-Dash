@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx server.ts",
     "build:client": "vite build",
-    "build:server": "esbuild server.ts --bundle --platform=node --target=node20 --format=esm --outfile=dist-server/server.js --external:express --external:ws --external:@google/genai",
+    "build:server": "esbuild server.ts --bundle --platform=node --target=node20 --format=esm --outfile=dist-server/server.js --loader:.ts=ts --external:express --external:ws --external:@google/genai",
     "build": "npm run build:client && npm run build:server",
     "start": "node dist-server/server.js",
     "preview": "vite preview",
