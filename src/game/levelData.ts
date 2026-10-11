@@ -623,195 +623,146 @@ export const STAGES: LevelConfig[] = [
 /**
  * Procedurally generates track elements (platforms, obstacles, coins, powerups) for a given level.
  */
-export function generateLevelElements(stageNum: number) {
-  const stage = STAGES[stageNum - 1] || STAGES[0];
-  const length = stage.trackLength;
-
+export function generateLevelElements(stageNum: number): {
+  platforms: Platform[];
+  obstacles: Obstacle[];
+  collectibles: Collectible[];
+} {
+  const safeStageNum = Number.isFinite(stageNum)
+    ? Math.max(1, Math.min(STAGES.length, Math.floor(stageNum)))
+    : 1;
+  const stage = STAGES[safeStageNum - 1] ?? STAGES[0];
+  const length = Math.max(1800, stage.trackLength);
+  const groundY = 380;
   const platforms: Platform[] = [];
   const obstacles: Obstacle[] = [];
   const collectibles: Collectible[] = [];
 
-  // Base ground segments with occasional gaps
+  const rand = (min: number, max: number) => min + Math.random() * (max - min);
   let currentX = 0;
-  const groundY = 380; // Ground height in coordinate system (canvas height 450)
+  let segmentIndex = 0;
 
+  // Ground segments intentionally overlap slightly. This guarantees a continuous
+  // running surface and prevents random gaps from making a stage impossible.
   while (currentX < length) {
-    const isGap = currentX > 600 && Math.random() < (0.15 + stageNum * 0.04);
-    const segmentWidth = isGap ? Math.floor(140 + Math.random() * 80) : Math.floor(400 + Math.random() * 600);
+    const segmentWidth = Math.min(Math.floor(rand(420, 601)), length - currentX);
+    if (segmentWidth <= 0) break;
 
-    if (!isGap) {
+    platforms.push({
+      x: currentX,
+      y: groundY,
+      width: segmentWidth + 2,
+      height: 70,
+      type: 'ground',
+    });
+
+    // Floating route / optional coin reward.
+    if (segmentWidth >= 300 && Math.random() < 0.48) {
+      const floatW = Math.min(Math.floor(rand(120, 191)), segmentWidth - 40);
+      const floatX = currentX + rand(20, Math.max(21, segmentWidth - floatW - 20));
+      const floatY = groundY - Math.floor(rand(75, 136));
+      let type: Platform['type'] = 'floating';
+      if (safeStageNum >= 3 && Math.random() < 0.18) type = 'crumbling';
+      else if (Math.random() < 0.18) type = 'moving';
+
       platforms.push({
-        x: currentX,
-        y: groundY,
-        width: segmentWidth,
-        height: 70,
-        type: 'ground',
+        x: floatX, y: floatY, width: floatW, height: 18, type,
+        crumbleTimer: 0, moveOffset: 0, moveSpeed: 1.5, moveRange: 40,
       });
 
-      // Spawn floating platforms above
-      if (Math.random() < 0.6) {
-        const floatY = groundY - (70 + Math.floor(Math.random() * 2) * 60);
-        const floatW = 120 + Math.random() * 140;
-        const floatX = currentX + 80 + Math.random() * (segmentWidth - 250);
-
-        platforms.push({
-          x: floatX,
-          y: floatY,
-          width: floatW,
-          height: 18,
-          type: Math.random() < 0.3 && stageNum >= 3 ? 'crumbling' : (Math.random() < 0.25 ? 'moving' : 'floating'),
-          crumbleTimer: 0,
-          moveOffset: 0,
-          moveSpeed: 1.5,
-          moveRange: 40,
-        });
-
-        // Coins on floating platform
-        for (let c = 0; c < 3; c++) {
-          collectibles.push({
-            id: `coin_${floatX}_${c}`,
-            x: floatX + 25 + c * 35,
-            y: floatY - 25,
-            type: 'coin',
-            collected: false,
-          });
-        }
-      }
-
-      // Add ground obstacles
-      if (currentX > 300) {
-        const obsRoll = Math.random();
-        if (obsRoll < 0.35 + stageNum * 0.05) {
-          const obsX = currentX + 150 + Math.random() * (segmentWidth - 250);
-          
-          if (stageNum >= 2 && Math.random() < 0.35) {
-            // High Laser fence requiring SLIDE! (height starts above ground)
-            obstacles.push({
-              id: `laser_${obsX}`,
-              x: obsX,
-              y: groundY - 55,
-              width: 32,
-              height: 35,
-              type: 'laser_fence',
-              active: true,
-            });
-          } else if (stageNum >= 3 && Math.random() < 0.3) {
-            // Fire jet
-            obstacles.push({
-              id: `fire_${obsX}`,
-              x: obsX,
-              y: groundY - 40,
-              width: 36,
-              height: 40,
-              type: 'fire_jet',
-              active: true,
-            });
-          } else {
-            // Ground Spikes
-            obstacles.push({
-              id: `spike_${obsX}`,
-              x: obsX,
-              y: groundY - 26,
-              width: 38,
-              height: 26,
-              type: 'spike',
-              active: true,
-            });
-          }
-        }
-
-        // Flying Drone sentries in later stages
-        if (stageNum >= 2 && Math.random() < 0.3 + stageNum * 0.08) {
-          const droneX = currentX + 200 + Math.random() * 200;
-          obstacles.push({
-            id: `drone_${droneX}`,
-            x: droneX,
-            y: groundY - 90 - Math.random() * 50,
-            width: 34,
-            height: 28,
-            type: 'drone',
-            active: true,
-            health: 2,
-            patrolY: {
-              min: groundY - 140,
-              max: groundY - 70,
-              speed: 1.2 + stageNum * 0.3,
-              dir: 1,
-            },
-          });
-        }
-      }
-
-      // Coin trails along ground
-      if (Math.random() < 0.5) {
-        const startCoinX = currentX + 60;
-        for (let i = 0; i < 4; i++) {
-          collectibles.push({
-            id: `coin_g_${startCoinX}_${i}`,
-            x: startCoinX + i * 36,
-            y: groundY - 24,
-            type: 'coin',
-            collected: false,
-          });
-        }
-      }
-
-      // Gems (worth 5 coins + bonus points)
-      if (Math.random() < 0.25) {
+      for (let i = 0; i < 3; i++) {
         collectibles.push({
-          id: `gem_${currentX}`,
-          x: currentX + segmentWidth / 2,
-          y: groundY - 60 - Math.random() * 30,
-          type: 'gem',
+          id: `coin_float_${safeStageNum}_${segmentIndex}_${i}`,
+          x: floatX + 20 + i * 32,
+          y: floatY - 25,
+          type: 'coin',
           collected: false,
         });
       }
-
-      // Power-up Canisters
-      if (Math.random() < 0.18 && currentX > 400 && currentX < length - 400) {
-        // Select an available power-up according to stage
-        const availablePus: PowerUpType[] = ['speed_dash', 'plasma_shield'];
-        if (stageNum >= 2) availablePus.push('coin_magnet', 'triple_blaster');
-        if (stageNum >= 3) availablePus.push('chrono_warp');
-        if (stageNum >= 4) availablePus.push('hyper_jetpack');
-        if (stageNum >= 5) availablePus.push('quantum_nova');
-
-        const chosen = availablePus[Math.floor(Math.random() * availablePus.length)];
-
-        collectibles.push({
-          id: `pu_${currentX}`,
-          x: currentX + segmentWidth * 0.7,
-          y: groundY - 45 - Math.random() * 35,
-          type: 'powerup',
-          powerUpType: chosen,
-          collected: false,
-        });
-      }
-
-      currentX += segmentWidth;
-    } else {
-      // Gap! Add floating spring pad or small stepping stones
-      if (segmentWidth > 150) {
-        platforms.push({
-          x: currentX + segmentWidth / 2 - 35,
-          y: groundY - 20,
-          width: 70,
-          height: 16,
-          type: 'floating',
-        });
-      }
-      currentX += segmentWidth;
     }
+
+    // Obstacles only spawn on wide ground sections and away from the start.
+    if (currentX > 450 && segmentWidth >= 330 && Math.random() < Math.min(0.28 + safeStageNum * 0.035, 0.46)) {
+      const obstacleX = currentX + rand(130, Math.max(131, segmentWidth - 75));
+      const roll = Math.random();
+      if (safeStageNum >= 2 && roll < 0.30) {
+        obstacles.push({
+          id: `laser_${safeStageNum}_${segmentIndex}`, x: obstacleX,
+          y: groundY - 55, width: 32, height: 35,
+          type: 'laser_fence', active: true,
+        });
+      } else if (safeStageNum >= 3 && roll < 0.50) {
+        obstacles.push({
+          id: `fire_${safeStageNum}_${segmentIndex}`, x: obstacleX,
+          y: groundY - 40, width: 36, height: 40,
+          type: 'fire_jet', active: true,
+        });
+      } else {
+        obstacles.push({
+          id: `spike_${safeStageNum}_${segmentIndex}`, x: obstacleX,
+          y: groundY - 26, width: 38, height: 26,
+          type: 'spike', active: true,
+        });
+      }
+    }
+
+    // Flying drones start in Stage 2.
+    if (safeStageNum >= 2 && currentX > 650 && segmentWidth >= 340 && Math.random() < 0.28) {
+      const minY = groundY - 140;
+      const maxY = groundY - 75;
+      obstacles.push({
+        id: `drone_${safeStageNum}_${segmentIndex}`,
+        x: currentX + rand(170, Math.max(171, segmentWidth - 60)),
+        y: rand(minY, maxY), width: 34, height: 28,
+        type: 'drone', active: true, health: 2,
+        patrolY: { min: minY, max: maxY, speed: 1.2 + safeStageNum * 0.2, dir: 1 },
+      });
+    }
+
+    // Coins stay within their ground segment.
+    if (segmentWidth >= 220 && Math.random() < 0.52) {
+      for (let i = 0; i < 4; i++) {
+        const coinX = currentX + 50 + i * 32;
+        if (coinX < currentX + segmentWidth - 10) {
+          collectibles.push({
+            id: `coin_ground_${safeStageNum}_${segmentIndex}_${i}`,
+            x: coinX, y: groundY - 24, type: 'coin', collected: false,
+          });
+        }
+      }
+    }
+
+    if (segmentWidth >= 250 && Math.random() < 0.2) {
+      collectibles.push({
+        id: `gem_${safeStageNum}_${segmentIndex}`,
+        x: currentX + segmentWidth / 2,
+        y: groundY - 65,
+        type: 'gem', collected: false,
+      });
+    }
+
+    if (safeStageNum >= 2 && currentX > 400 && currentX < length - 400 && Math.random() < 0.2) {
+      const powerUps: PowerUpType[] = ['speed_dash', 'plasma_shield', 'coin_magnet', 'triple_blaster'];
+      if (safeStageNum >= 3) powerUps.push('chrono_warp');
+      if (safeStageNum >= 4) powerUps.push('hyper_jetpack');
+      if (safeStageNum >= 5) powerUps.push('quantum_nova');
+      collectibles.push({
+        id: `powerup_${safeStageNum}_${segmentIndex}`,
+        x: currentX + segmentWidth * 0.65,
+        y: groundY - 55,
+        type: 'powerup',
+        powerUpType: powerUps[Math.floor(Math.random() * powerUps.length)],
+        collected: false,
+      });
+    }
+
+    currentX += segmentWidth;
+    segmentIndex++;
   }
 
-  // Ensure solid finish line platform
-  platforms.push({
-    x: length,
-    y: groundY,
-    width: 600,
-    height: 70,
-    type: 'ground',
-  });
+  // Ensure a safe start and a solid finish runway, even if generation changes later.
+  platforms.push({ x: 0, y: groundY, width: 720, height: 70, type: 'ground' });
+  platforms.push({ x: Math.max(0, length - 500), y: groundY, width: 650, height: 70, type: 'ground' });
 
   return { platforms, obstacles, collectibles };
 }
