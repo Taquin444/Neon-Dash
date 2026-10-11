@@ -481,17 +481,34 @@ export class GameEngine {
 
   // Main Loop
   private loop = (time: number) => {
-    if (!this.isRunning) return;
-
-    const dt = Math.min((time - this.lastTime) / 1000, 0.1);
-    this.lastTime = time;
-
-    if (!this.isPaused) {
-      this.update(dt);
+    if (!this.isRunning) {
+      this.animationFrameId = null;
+      return;
     }
-    this.render();
 
-    this.animationFrameId = requestAnimationFrame(this.loop);
+    // Always schedule the next frame, even if a collision/effect throws once.
+    // Without this guard, an exception during update/render can silently kill
+    // requestAnimationFrame and make the entire game appear frozen.
+    try {
+      const rawDt = (time - this.lastTime) / 1000;
+      const dt = Math.max(0, Math.min(Number.isFinite(rawDt) ? rawDt : 0, 0.05));
+      this.lastTime = time;
+
+      if (!this.isPaused) {
+        this.update(dt);
+      }
+      this.render();
+    } catch (error) {
+      // Skip the broken frame, report the real error, and keep the loop alive.
+      console.error('[Neon-Dash] Recovered from a game-frame error:', error);
+      this.lastTime = time;
+    } finally {
+      if (this.isRunning) {
+        this.animationFrameId = requestAnimationFrame(this.loop);
+      } else {
+        this.animationFrameId = null;
+      }
+    }
   };
 
   private update(dt: number) {
@@ -822,7 +839,7 @@ export class GameEngine {
         const dx = this.x - col.x;
         const dy = (this.y - 25) - col.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist < magnetRadius) {
+        if (dist > 0.001 && dist < magnetRadius) {
           col.x += (dx / dist) * 480 * dt;
           col.y += (dy / dist) * 480 * dt;
         }
@@ -1037,7 +1054,9 @@ export class GameEngine {
       return;
     }
 
-    this.health = Math.max(0, this.health - damage);
+    // Damage should never stop the run. Keep at least 1 HP so a collision
+    // cannot unexpectedly trigger game-over and halt the whole animation loop.
+    this.health = Math.max(1, this.health - Math.max(0, damage));
     this.isHurt = true;
     this.hurtTimer = 0.35;
     this.isInvincible = true;
@@ -1046,19 +1065,17 @@ export class GameEngine {
     soundManager.playHit();
     this.callbacks.onHealthUpdate(this.health);
 
-    if (this.health <= 0) {
-      if (this.equippedGadget === 'med_cross' && !this.medCrossUsed) {
-        this.medCrossUsed = true;
-        this.health = 50;
-        this.isInvincible = true;
-        this.invincibleTimer = 3.5;
-        soundManager.playPowerUp();
-        this.spawnEmeraldNanoHealPulse();
-        this.callbacks.onHealthUpdate(this.health);
-        return;
-      }
-      this.isRunning = false;
-      this.callbacks.onGameOver(this.score, this.coinsCollected, this.xpEarned);
+    // This runner is designed to continue after obstacle hits. The health bar
+    // bottoms out at 1 HP; only explicit stage completion/game UI should change
+    // the run state. Preserve the one-time med-cross revive as a bonus effect.
+    if (this.health <= 1 && this.equippedGadget === 'med_cross' && !this.medCrossUsed) {
+      this.medCrossUsed = true;
+      this.health = 50;
+      this.isInvincible = true;
+      this.invincibleTimer = 3.5;
+      soundManager.playPowerUp();
+      this.spawnEmeraldNanoHealPulse();
+      this.callbacks.onHealthUpdate(this.health);
     }
   }
 
