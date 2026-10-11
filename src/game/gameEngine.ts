@@ -204,7 +204,10 @@ export class GameEngine {
     vehicle: VehicleId = 'none',
     gadget: GadgetId = 'combat_drone'
   ) {
-    this.currentStage = stageNum;
+    const safeStageNum = Number.isFinite(stageNum)
+      ? Math.max(1, Math.min(STAGES.length, Math.floor(stageNum)))
+      : 1;
+    this.currentStage = safeStageNum;
     this.charId = character;
     this.equippedWeapon = weapon;
     this.equippedCape = cape;
@@ -218,7 +221,7 @@ export class GameEngine {
     this.isMultiplayer = isMultiplayer;
     if (powerUpLevels) this.powerUpLevels = powerUpLevels;
 
-    const stageConfig = STAGES[stageNum - 1] || STAGES[0];
+    const stageConfig = STAGES[safeStageNum - 1] || STAGES[0];
     this.trackLength = stageConfig.trackLength;
     this.gravity = stageConfig.gravity;
     this.baseScrollSpeed = stageConfig.baseSpeed;
@@ -227,12 +230,15 @@ export class GameEngine {
     this.bossHealth = this.bossMaxHealth;
 
     // Generate Level elements
-    const elements = generateLevelElements(stageNum);
+    const elements = generateLevelElements(safeStageNum);
     this.platforms = elements.platforms;
     this.obstacles = elements.obstacles;
     this.collectibles = elements.collectibles;
     this.projectiles = [];
     this.particles = [];
+    this.remotePlayers.clear();
+    this.isPaused = false;
+    this.isFinished = false;
 
     // Reset Player
     this.x = 80;
