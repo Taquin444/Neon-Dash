@@ -8,7 +8,7 @@ interface TouchControlsProps {
     jump: () => void;
     slide: () => void;
     dash: () => void;
-    attack: () => void;
+    attack: (active: boolean) => void;
     powerup: () => void;
   };
 }
@@ -26,25 +26,51 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
     }
   };
 
+  const startSteering = (
+    direction: 'left' | 'right',
+    event: React.PointerEvent<HTMLButtonElement>
+  ) => {
+    event.preventDefault();
+    triggerHaptic();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    onInput[direction](true);
+  };
+
+  const stopSteering = (
+    direction: 'left' | 'right',
+    event: React.PointerEvent<HTMLButtonElement>
+  ) => {
+    event.preventDefault();
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    onInput[direction](false);
+  };
+
+  const startFiring = (event: React.PointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    triggerHaptic();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    onInput.attack(true);
+  };
+
+  const stopFiring = (event: React.PointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    onInput.attack(false);
+  };
+
   return (
     <div className="absolute inset-x-0 bottom-0 pointer-events-none select-none z-30 pb-3 px-3 flex justify-between items-end">
       {/* Left Thumb Cluster: Steering Directionals */}
       <div className="flex items-center gap-2 pointer-events-auto">
         <button
-          onTouchStart={(e) => {
-            e.preventDefault();
-            triggerHaptic();
-            onInput.left(true);
-          }}
-          onTouchEnd={(e) => {
-            e.preventDefault();
-            onInput.left(false);
-          }}
-          onMouseDown={() => {
-            triggerHaptic();
-            onInput.left(true);
-          }}
-          onMouseUp={() => onInput.left(false)}
+          onPointerDown={(event) => startSteering('left', event)}
+          onPointerUp={(event) => stopSteering('left', event)}
+          onPointerCancel={(event) => stopSteering('left', event)}
+          onLostPointerCapture={() => onInput.left(false)}
           className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-slate-900/80 active:bg-cyan-500/40 border-2 border-slate-700/80 active:border-cyan-400 flex items-center justify-center text-cyan-300 backdrop-blur-md shadow-lg active:scale-95 transition-all touch-none cursor-pointer"
           aria-label="Steer Left"
         >
@@ -52,20 +78,10 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
         </button>
 
         <button
-          onTouchStart={(e) => {
-            e.preventDefault();
-            triggerHaptic();
-            onInput.right(true);
-          }}
-          onTouchEnd={(e) => {
-            e.preventDefault();
-            onInput.right(false);
-          }}
-          onMouseDown={() => {
-            triggerHaptic();
-            onInput.right(true);
-          }}
-          onMouseUp={() => onInput.right(false)}
+          onPointerDown={(event) => startSteering('right', event)}
+          onPointerUp={(event) => stopSteering('right', event)}
+          onPointerCancel={(event) => stopSteering('right', event)}
+          onLostPointerCapture={() => onInput.right(false)}
           className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-slate-900/80 active:bg-cyan-500/40 border-2 border-slate-700/80 active:border-cyan-400 flex items-center justify-center text-cyan-300 backdrop-blur-md shadow-lg active:scale-95 transition-all touch-none cursor-pointer"
           aria-label="Steer Right"
         >
@@ -80,12 +96,8 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
 
           {/* Power-up button */}
           <button
-            onTouchStart={(e) => {
-              e.preventDefault();
-              triggerHaptic();
-              onInput.powerup();
-            }}
-            onMouseDown={() => {
+            onClick={(event) => {
+              event.preventDefault();
               triggerHaptic();
               onInput.powerup();
             }}
@@ -95,31 +107,22 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
             <Sparkles className="w-5 h-5 text-purple-300" />
           </button>
 
-          {/* Shoot Blaster */}
+          {/* Hold to fire manually; releasing the button stops the weapon. */}
           <button
-            onTouchStart={(e) => {
-              e.preventDefault();
-              triggerHaptic();
-              onInput.attack();
-            }}
-            onMouseDown={() => {
-              triggerHaptic();
-              onInput.attack();
-            }}
+            onPointerDown={startFiring}
+            onPointerUp={stopFiring}
+            onPointerCancel={stopFiring}
+            onLostPointerCapture={() => onInput.attack(false)}
             className="w-12 h-12 rounded-xl bg-slate-900/80 active:bg-emerald-500/40 border border-emerald-500/60 flex items-center justify-center text-emerald-300 backdrop-blur-md shadow-md active:scale-95 transition-all touch-none cursor-pointer"
-            aria-label="Fire Blaster"
+            aria-label="Hold to fire blaster"
           >
             <Crosshair className="w-6 h-6" />
           </button>
 
           {/* Dash Turbo */}
           <button
-            onTouchStart={(e) => {
-              e.preventDefault();
-              triggerHaptic();
-              onInput.dash();
-            }}
-            onMouseDown={() => {
+            onClick={(event) => {
+              event.preventDefault();
               triggerHaptic();
               onInput.dash();
             }}
@@ -134,12 +137,8 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
         <div className="flex flex-col gap-2.5 items-center">
           {/* Jump Button (Dominant) */}
           <button
-            onTouchStart={(e) => {
-              e.preventDefault();
-              triggerHaptic();
-              onInput.jump();
-            }}
-            onMouseDown={() => {
+            onClick={(event) => {
+              event.preventDefault();
               triggerHaptic();
               onInput.jump();
             }}
@@ -152,12 +151,8 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
 
           {/* Slide / Duck Button */}
           <button
-            onTouchStart={(e) => {
-              e.preventDefault();
-              triggerHaptic();
-              onInput.slide();
-            }}
-            onMouseDown={() => {
+            onClick={(event) => {
+              event.preventDefault();
               triggerHaptic();
               onInput.slide();
             }}

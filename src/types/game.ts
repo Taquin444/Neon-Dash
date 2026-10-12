@@ -176,6 +176,7 @@ export interface Projectile {
   color: string;
   fromPlayer: boolean;
   lifetime: number;
+  damage?: number;
 }
 
 export interface Particle {
@@ -208,6 +209,25 @@ export interface LevelConfig {
   bossHealth?: number;
   bossName?: string;
   isExtremeBoss?: boolean;
+}
+
+export type EnemyArchetype = 'scout' | 'striker' | 'brute';
+
+export interface CombatEnemy {
+  id: string;
+  archetype: EnemyArchetype;
+  x: number;
+  y: number;
+  baseY: number;
+  width: number;
+  height: number;
+  health: number;
+  maxHealth: number;
+  attackCooldown: number;
+  attackInterval: number;
+  moveSpeed: number;
+  phase: number;
+  active: boolean;
 }
 
 export interface RemotePlayer {

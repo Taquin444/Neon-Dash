@@ -95,6 +95,106 @@ export const PALETTES: Record<CharacterId, CharacterColorPalette> = {
 };
 
 export class SpriteRenderer {
+  private static ninjaSpriteImage: HTMLImageElement | null = null;
+
+  private static getNinjaSpriteImage(): HTMLImageElement | null {
+    if (typeof Image === 'undefined') return null;
+
+    if (!this.ninjaSpriteImage) {
+      const image = new Image();
+      image.src = new URL('../assets/neon-ninja-sprite.png', import.meta.url).href;
+      this.ninjaSpriteImage = image;
+    }
+
+    return this.ninjaSpriteImage;
+  }
+
+  /** Draw the dedicated transparent Neon Ninja art with lightweight action motion. */
+  private static renderNinjaSprite(
+    ctx: CanvasRenderingContext2D,
+    action: SpriteAction,
+    animTimer: number
+  ): boolean {
+    const image = this.getNinjaSpriteImage();
+    if (!image?.complete || image.naturalWidth === 0) return false;
+
+    let width = 108;
+    let height = 69;
+    let bob = 0;
+    let rotation = 0;
+
+    switch (action) {
+      case 'idle':
+        bob = Math.sin(animTimer * 4) * 1.4;
+        break;
+      case 'run': {
+        const stride = animTimer * 14;
+        bob = Math.abs(Math.sin(stride)) * 2.5;
+        rotation = Math.sin(stride) * 0.025;
+        break;
+      }
+      case 'jump':
+        bob = -3;
+        rotation = -0.06;
+        break;
+      case 'fall':
+        bob = 2;
+        rotation = 0.06;
+        break;
+      case 'dash':
+        width = 116;
+        rotation = 0.08;
+        break;
+      case 'slide':
+        width = 98;
+        height = 56;
+        break;
+      case 'hurt':
+        rotation = -0.12;
+        break;
+      default:
+        break;
+    }
+
+    const left = -width / 2;
+    const top = -height + bob;
+    ctx.save();
+
+    if (action === 'victory') {
+      ctx.strokeStyle = '#00f5d4';
+      ctx.lineWidth = 2;
+      ctx.shadowColor = '#00f5d4';
+      ctx.shadowBlur = 12;
+      ctx.beginPath();
+      ctx.ellipse(0, -34, 37, 31, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+    }
+
+    if (rotation) ctx.rotate(rotation);
+    ctx.drawImage(image, left, top, width, height);
+
+    if (action === 'hurt') {
+      ctx.save();
+      ctx.globalCompositeOperation = 'source-atop';
+      ctx.fillStyle = 'rgba(255, 0, 84, 0.42)';
+      ctx.fillRect(left, top, width, height);
+      ctx.restore();
+    } else if (action === 'shoot') {
+      const pulse = 3 + Math.sin(animTimer * 42) * 1.2;
+      ctx.fillStyle = '#00f5d4';
+      ctx.shadowColor = '#00f5d4';
+      ctx.shadowBlur = 14;
+      ctx.beginPath();
+      ctx.arc(48, -28, pulse, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+
+    ctx.restore();
+    return true;
+  }
+
   /**
    * Draws the animated player or multiplayer opponent sprite on the 2D canvas.
    */
@@ -149,6 +249,18 @@ export class SpriteRenderer {
     if (action === 'dash') {
       ctx.shadowColor = palette.glow;
       ctx.shadowBlur = 18;
+    }
+
+    // The default ninja has a dedicated transparent sprite; keep procedural
+    // character rendering as a fallback and for every other gear combination.
+    if (
+      charId === 'ninja' &&
+      weaponId === 'katana' &&
+      capeId === 'starter_scarf' &&
+      this.renderNinjaSprite(ctx, action, animTimer)
+    ) {
+      ctx.restore();
+      return;
     }
 
     switch (action) {

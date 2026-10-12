@@ -53,14 +53,20 @@ export const VictoryModal: React.FC<VictoryModalProps> = ({
         </div>
 
         <h2 className="text-2xl font-black tracking-wide text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-teal-200 to-fuchsia-400">
-          {isMultiplayer ? 'VICTORY ROYALE!' : stageNumber === 10 ? 'EXTREME BOSS DEFEATED!' : 'STAGE CLEARED!'}
+          {stageNumber === 10
+            ? '5X FINAL BOSS DEFEATED!'
+            : stageNumber === 5
+            ? 'MINI-BOSS DEFEATED!'
+            : isMultiplayer
+            ? 'COMBAT VICTORY!'
+            : 'STAGE CLEARED!'}
         </h2>
         <p className="text-xs text-slate-400 font-mono mt-1">
-          {isMultiplayer
-            ? 'You crossed the finish line first!'
-            : stageNumber === 10
-            ? 'FINAL SECTOR 10 CONQUERED! ALL SECTORS CLEARED!'
-            : `Sector 0${stageNumber} Completed`}
+          {stageNumber === 10
+            ? 'All five waves cleared. The Omega Colossus is down.'
+            : stageNumber === 5
+            ? 'All five waves cleared. Glitch Overlord Prime is down.'
+            : `All five waves cleared in Sector 0${stageNumber}.`}
         </p>
 
         {/* Stats card */}
@@ -109,7 +115,7 @@ export const VictoryModal: React.FC<VictoryModalProps> = ({
               className="w-full py-3.5 px-4 rounded-xl font-bold text-xs uppercase tracking-wider text-slate-950 bg-gradient-to-r from-cyan-400 to-teal-300 hover:brightness-110 active:scale-98 transition-all flex items-center justify-center gap-2 cursor-pointer shadow-[0_0_20px_rgba(0,245,212,0.4)]"
             >
               <RotateCcw className="w-4 h-4" />
-              RACE AGAIN
+              FIGHT AGAIN
             </button>
           )}
 

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { PowerUpType, RemotePlayer, GadgetId } from '../types/game';
-import { Volume2, VolumeX, Pause, Heart, Coins, Trophy, Smile, Bot } from 'lucide-react';
-import { POWER_UPS, GADGETS } from '../game/levelData';
+import { PowerUpType, GadgetId } from '../types/game';
+import { Volume2, VolumeX, Pause, Heart, Coins, Trophy, Smile } from 'lucide-react';
+import { POWER_UPS, GADGETS, WAVES_PER_STAGE } from '../game/levelData';
 
 interface GameHUDProps {
   score: number;
@@ -10,12 +10,13 @@ interface GameHUDProps {
   progress: number;
   stageName: string;
   stageNumber: number;
+  waveNumber: number;
+  enemiesRemaining: number;
   activePowerUps: { type: PowerUpType; timeLeft: number }[];
   isMuted: boolean;
   onToggleMute: () => void;
   onPause: () => void;
   isMultiplayer: boolean;
-  remotePlayers: RemotePlayer[];
   onSendEmote?: (emote: string) => void;
   equippedGadget?: GadgetId;
 }
@@ -29,12 +30,13 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   progress,
   stageName,
   stageNumber,
+  waveNumber,
+  enemiesRemaining,
   activePowerUps,
   isMuted,
   onToggleMute,
   onPause,
   isMultiplayer,
-  remotePlayers,
   onSendEmote,
   equippedGadget,
 }) => {
@@ -155,34 +157,23 @@ export const GameHUD: React.FC<GameHUDProps> = ({
         </div>
       </div>
 
-      {/* Progress Track Bar (With Local Player & Multiplayer Opponent Markers) */}
-      <div className="mt-3 max-w-md mx-auto pointer-events-auto">
-        <div className="relative w-full h-2 bg-slate-950/80 rounded-full border border-slate-800 overflow-visible backdrop-blur-md">
-          {/* Track Progress Fill */}
-          <div
-            className="h-full bg-gradient-to-r from-cyan-500 to-fuchsia-500 rounded-full transition-all duration-150"
-            style={{ width: `${progress}%` }}
-          />
-
-          {/* Local Player Marker */}
-          <div
-            className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-4 h-4 rounded-full bg-cyan-400 border-2 border-white shadow-[0_0_8px_#00f5d4] transition-all duration-150 flex items-center justify-center text-[8px] font-bold text-slate-950"
-            style={{ left: `${progress}%` }}
-          >
-            YOU
-          </div>
-
-          {/* Opponent Markers in Multiplayer */}
-          {isMultiplayer &&
-            remotePlayers.map((rp) => (
-              <div
-                key={rp.id}
-                className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3.5 h-3.5 rounded-full bg-fuchsia-500 border border-white shadow-[0_0_6px_#f72585] transition-all duration-200"
-                style={{ left: `${rp.progress}%` }}
-                title={`${rp.name}: ${rp.progress}%`}
-              />
-            ))}
+      {/* Wave objective replaces the old distance-to-finish track. */}
+      <div className="mt-3 max-w-sm mx-auto pointer-events-auto">
+        <div className="flex items-center justify-between gap-4 mb-1.5 px-1 text-[10px] font-mono font-bold tracking-wider">
+          <span className="text-cyan-300">WAVE {waveNumber} / {WAVES_PER_STAGE}</span>
+          <span className={enemiesRemaining > 0 ? 'text-rose-300' : 'text-amber-300'}>
+            {enemiesRemaining > 0 ? `${enemiesRemaining} HOSTILES REMAIN` : 'WAVE CLEARING'}
+          </span>
         </div>
+        <div className="w-full h-2 bg-slate-950/90 rounded-full border border-slate-800 overflow-hidden backdrop-blur-md">
+          <div
+            className="h-full bg-gradient-to-r from-cyan-500 via-teal-300 to-fuchsia-500 rounded-full transition-all duration-200"
+            style={{ width: `${Math.max(0, Math.min(100, progress))}%` }}
+          />
+        </div>
+        <p className="mt-1 text-center text-[8px] sm:text-[9px] font-mono tracking-wide text-slate-400">
+          MOVE A / D OR ← / → · HOLD K / F TO FIRE · SPACE JUMP · SHIFT DASH
+        </p>
       </div>
 
       {/* Active Power-Ups Badges */}
