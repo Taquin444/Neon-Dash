@@ -1,4 +1,4 @@
-import { SpriteAction, CharacterId, WeaponId, CapeId, VehicleId, GadgetId } from '../types/game';
+import { SpriteAction, CharacterId, WeaponId, CapeId, GadgetId } from '../types/game';
 
 export interface CharacterColorPalette {
   body: string;
@@ -1048,7 +1048,7 @@ export class SpriteRenderer {
     ctx: CanvasRenderingContext2D,
     x: number,
     y: number,
-    vehicleId: VehicleId,
+    vehicleId?: string,
     charId: CharacterId = 'ninja',
     animTimer: number = 0,
     isBoosting: boolean = false,
@@ -1056,7 +1056,7 @@ export class SpriteRenderer {
     isAirborne: boolean = false,
     capeId: CapeId = 'starter_scarf'
   ) {
-    if (vehicleId === 'none') return;
+    if (!vehicleId || vehicleId === 'none') return;
 
     ctx.save();
     ctx.translate(x, y);

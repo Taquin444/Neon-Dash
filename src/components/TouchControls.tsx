@@ -1,5 +1,5 @@
 import React from 'react';
-import { ArrowLeft, ArrowRight, ArrowUp, ArrowDown, Zap, Crosshair, Sparkles, Car } from 'lucide-react';
+import { ArrowLeft, ArrowRight, ArrowUp, ArrowDown, Zap, Crosshair, Sparkles } from 'lucide-react';
 
 interface TouchControlsProps {
   onInput: {
@@ -10,16 +10,11 @@ interface TouchControlsProps {
     dash: () => void;
     attack: () => void;
     powerup: () => void;
-    mount?: () => void;
   };
-  hasVehicle?: boolean;
-  isMounted?: boolean;
 }
 
 export const TouchControls: React.FC<TouchControlsProps> = ({
   onInput,
-  hasVehicle = false,
-  isMounted = false,
 }) => {
   const triggerHaptic = () => {
     try {
@@ -80,31 +75,8 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
 
       {/* Right Thumb Cluster: Combat & Agility Action Buttons */}
       <div className="flex items-end gap-2.5 pointer-events-auto">
-        {/* Secondary Actions column: Mount, Shoot & Dash & Powerup */}
+        {/* Secondary Actions column: Shoot & Dash & Powerup */}
         <div className="flex flex-col gap-2 items-center">
-          {/* Vehicle Mount Toggle Button (If player has equipped vehicle) */}
-          {hasVehicle && onInput.mount && (
-            <button
-              onTouchStart={(e) => {
-                e.preventDefault();
-                triggerHaptic();
-                onInput.mount?.();
-              }}
-              onMouseDown={() => {
-                triggerHaptic();
-                onInput.mount?.();
-              }}
-              className={`w-11 h-11 rounded-xl border flex items-center justify-center backdrop-blur-md shadow-md active:scale-90 transition-all touch-none cursor-pointer ${
-                isMounted
-                  ? 'bg-teal-500 text-slate-950 border-teal-300 shadow-[0_0_15px_rgba(20,184,166,0.5)]'
-                  : 'bg-slate-900/80 text-teal-300 border-teal-500/60 active:bg-teal-950/60'
-              }`}
-              aria-label="Toggle Vehicle Mount"
-              title="Toggle Vehicle Mount [V]"
-            >
-              <Car className="w-5 h-5" />
-            </button>
-          )}
 
           {/* Power-up button */}
           <button

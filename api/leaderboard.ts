@@ -10,18 +10,7 @@ interface LeaderboardEntry {
   date: string;
 }
 
-const defaultLeaderboards: LeaderboardEntry[] = [
-  { id: '1', name: 'CyberPhantom', character: 'Neon Ninja', score: 28450, stage: 5, wins: 42, date: 'Today' },
-  { id: '2', name: 'Valkyrie99', character: 'Valkyrie Mecha', score: 24100, stage: 5, wins: 36, date: 'Today' },
-  { id: '3', name: 'GlitchRunner', character: 'Cyber Punk', score: 19800, stage: 4, wins: 28, date: 'Yesterday' },
-  { id: '4', name: 'ShadowX', character: 'Shadow Ronin', score: 17500, stage: 4, wins: 21, date: '2d ago' },
-  { id: '5', name: 'HyperPulse', character: 'Neon Ninja', score: 15320, stage: 3, wins: 15, date: '3d ago' },
-  { id: '6', name: 'NovaStrike', character: 'Valkyrie Mecha', score: 12900, stage: 3, wins: 12, date: '3d ago' },
-  { id: '7', name: 'AeroZero', character: 'Cyber Punk', score: 10400, stage: 2, wins: 9, date: '4d ago' },
-  { id: '8', name: 'ByteMaster', character: 'Shadow Ronin', score: 8650, stage: 2, wins: 6, date: '5d ago' },
-];
-
-let cachedLeaderboard: LeaderboardEntry[] = [...defaultLeaderboards];
+let cachedLeaderboard: LeaderboardEntry[] = [];
 
 export default function handler(req: Request, res: Response) {
   if (req.method === 'POST') {

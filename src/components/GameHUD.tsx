@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { PowerUpType, RemotePlayer, VehicleId, GadgetId } from '../types/game';
-import { Volume2, VolumeX, Pause, Heart, Coins, Trophy, Smile, Car, Bot } from 'lucide-react';
-import { POWER_UPS, VEHICLES, GADGETS } from '../game/levelData';
+import { PowerUpType, RemotePlayer, GadgetId } from '../types/game';
+import { Volume2, VolumeX, Pause, Heart, Coins, Trophy, Smile, Bot } from 'lucide-react';
+import { POWER_UPS, GADGETS } from '../game/levelData';
 
 interface GameHUDProps {
   score: number;
@@ -17,10 +17,7 @@ interface GameHUDProps {
   isMultiplayer: boolean;
   remotePlayers: RemotePlayer[];
   onSendEmote?: (emote: string) => void;
-  equippedVehicle?: VehicleId;
   equippedGadget?: GadgetId;
-  isVehicleMounted?: boolean;
-  onToggleVehicleMount?: () => void;
 }
 
 const EMOTES = ['🔥', '💨', '😈', '👑', '⚡', 'GG'];
@@ -39,10 +36,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   isMultiplayer,
   remotePlayers,
   onSendEmote,
-  equippedVehicle,
   equippedGadget,
-  isVehicleMounted,
-  onToggleVehicleMount,
 }) => {
   const [showEmotePicker, setShowEmotePicker] = useState(false);
 
@@ -100,32 +94,15 @@ export const GameHUD: React.FC<GameHUDProps> = ({
             </p>
           </div>
 
-          {/* Vehicle & Gadget Status Pills */}
-          <div className="flex items-center gap-1.5 pointer-events-auto">
-            {equippedVehicle && equippedVehicle !== 'none' && (
-              <button
-                onClick={onToggleVehicleMount}
-                className={`flex items-center gap-1.5 px-2 py-0.5 rounded-lg border text-[10px] font-mono font-bold transition-all cursor-pointer backdrop-blur-md shadow-sm ${
-                  isVehicleMounted
-                    ? 'bg-teal-950/90 text-teal-300 border-teal-400 shadow-[0_0_12px_rgba(20,184,166,0.3)]'
-                    : 'bg-slate-950/80 text-slate-400 border-slate-800 hover:text-white'
-                }`}
-                title="Toggle Vehicle Mount (Key: V)"
-              >
-                <span>{VEHICLES.find((v) => v.id === equippedVehicle)?.icon || '🏎️'}</span>
-                <span>{isVehicleMounted ? 'MOUNTED [V]' : 'MOUNT [V]'}</span>
-              </button>
-            )}
-
-            {equippedGadget && (
-              <div className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-slate-950/80 border border-slate-800 text-[10px] font-mono text-emerald-300 backdrop-blur-md shadow-sm">
-                <span>{GADGETS.find((g) => g.id === equippedGadget)?.icon || '🛸'}</span>
-                <span className="hidden sm:inline">
-                  {GADGETS.find((g) => g.id === equippedGadget)?.name.split(' ')[0] || 'GADGET'}
-                </span>
-              </div>
-            )}
-          </div>
+          {/* Gadget Status Pill */}
+          {equippedGadget && (
+            <div className="flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-slate-950/80 border border-slate-800 text-[10px] font-mono text-emerald-300 backdrop-blur-md shadow-sm pointer-events-auto">
+              <span>{GADGETS.find((g) => g.id === equippedGadget)?.icon || '🛸'}</span>
+              <span className="hidden sm:inline">
+                {GADGETS.find((g) => g.id === equippedGadget)?.name.split(' ')[0] || 'GADGET'}
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Right: Audio & Pause & Emote triggers */}

@@ -1,0 +1,18 @@
+{
+  "novaracer": {
+    "username": "NovaRacer",
+    "passcode": "cyberpass123",
+    "data": {
+      "coins": 500,
+      "highScore": 14500,
+      "maxStageUnlocked": 2,
+      "playerLevel": 3,
+      "multiplayerWins": 2,
+      "selectedCharacter": "ninja",
+      "username": "NovaRacer",
+      "isLoggedIn": true
+    },
+    "createdAt": "2026-10-12T08:29:10.354Z",
+    "updatedAt": "2026-10-12T08:29:10.354Z"
+  }
+}

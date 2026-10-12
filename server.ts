@@ -17,10 +17,6 @@ app.use((_req, res, next) => {
   next();
 });
 
-// --- STATIC FRONTEND FILE SERVING MIDDLEWARE ---
-// Points to the client-side 'dist' directory located outside of 'dist-server'
-app.use(express.static(path.join(__dirname, '../dist')));
-
 const server = http.createServer(app);
 
 // In-memory data store for persistent experience
@@ -34,33 +30,76 @@ interface LeaderboardEntry {
   date: string;
 }
 
-const defaultLeaderboards: LeaderboardEntry[] = [
-  { id: '1', name: 'CyberPhantom', character: 'Neon Ninja', score: 28450, stage: 5, wins: 42, date: 'Today' },
-  { id: '2', name: 'Valkyrie99', character: 'Valkyrie Mecha', score: 24100, stage: 5, wins: 36, date: 'Today' },
-  { id: '3', name: 'GlitchRunner', character: 'Cyber Punk', score: 19800, stage: 4, wins: 28, date: 'Yesterday' },
-  { id: '4', name: 'ShadowX', character: 'Shadow Ronin', score: 17500, stage: 4, wins: 21, date: '2d ago' },
-  { id: '5', name: 'HyperPulse', character: 'Neon Ninja', score: 15320, stage: 3, wins: 15, date: '3d ago' },
-  { id: '6', name: 'NovaStrike', character: 'Valkyrie Mecha', score: 12900, stage: 3, wins: 12, date: '3d ago' },
-  { id: '7', name: 'AeroZero', character: 'Cyber Punk', score: 10400, stage: 2, wins: 9, date: '4d ago' },
-  { id: '8', name: 'ByteMaster', character: 'Shadow Ronin', score: 8650, stage: 2, wins: 6, date: '5d ago' },
-];
+import fs from 'fs';
 
-let leaderboard: LeaderboardEntry[] = [...defaultLeaderboards];
+// Persistence directory
+const dataDir = path.resolve(process.cwd(), 'data');
+if (!fs.existsSync(dataDir)) {
+  fs.mkdirSync(dataDir, { recursive: true });
+}
 
-const playerProfiles: Record<string, any> = {};
+const usersFilePath = path.join(dataDir, 'users.json');
+const leaderboardFilePath = path.join(dataDir, 'leaderboard.json');
+
+// Real-time leaderboard: ONLY actual players who play the game
+let leaderboard: LeaderboardEntry[] = [];
+if (fs.existsSync(leaderboardFilePath)) {
+  try {
+    const raw = fs.readFileSync(leaderboardFilePath, 'utf-8');
+    leaderboard = JSON.parse(raw);
+  } catch {
+    leaderboard = [];
+  }
+}
+
+function persistLeaderboard() {
+  try {
+    fs.writeFileSync(leaderboardFilePath, JSON.stringify(leaderboard, null, 2));
+  } catch (err) {
+    console.error('Error saving leaderboard:', err);
+  }
+}
+
+// User accounts database
+interface UserAccount {
+  username: string;
+  passcode: string;
+  data: any;
+  createdAt: string;
+  updatedAt: string;
+}
+
+let users: Record<string, UserAccount> = {};
+if (fs.existsSync(usersFilePath)) {
+  try {
+    const raw = fs.readFileSync(usersFilePath, 'utf-8');
+    users = JSON.parse(raw);
+  } catch {
+    users = {};
+  }
+}
+
+function persistUsers() {
+  try {
+    fs.writeFileSync(usersFilePath, JSON.stringify(users, null, 2));
+  } catch (err) {
+    console.error('Error saving users:', err);
+  }
+}
 
 // REST endpoints
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() });
 });
 
+// Real-Time Leaderboard endpoint
 app.get('/api/leaderboard', (_req, res) => {
-  const sorted = [...leaderboard].sort((a, b) => b.score - a.score).slice(0, 20);
+  const sorted = [...leaderboard].sort((a, b) => b.score - a.score).slice(0, 30);
   res.json({ success: true, leaderboard: sorted });
 });
 
 app.post('/api/leaderboard', (req, res) => {
-  const { name, character, score, stage, wins } = req.body;
+  const { name, character, score, stage, wins } = req.body || {};
   if (!name || typeof score !== 'number') {
     return res.status(400).json({ error: 'Invalid payload' });
   }
@@ -86,32 +125,153 @@ app.post('/api/leaderboard', (req, res) => {
     });
   }
 
-  const sorted = [...leaderboard].sort((a, b) => b.score - a.score).slice(0, 20);
+  persistLeaderboard();
+  const sorted = [...leaderboard].sort((a, b) => b.score - a.score).slice(0, 30);
   res.json({ success: true, leaderboard: sorted });
 });
 
+// Pilot Authentication: Register New Pilot
+app.post('/api/auth/register', (req, res) => {
+  const { username, password, initialData } = req.body || {};
+  const cleanName = (username || '').trim();
+  const cleanPass = (password || '').trim();
+
+  if (!cleanName || cleanName.length < 3) {
+    return res.status(400).json({ error: 'Callsign must be at least 3 characters.' });
+  }
+  if (!cleanPass || cleanPass.length < 3) {
+    return res.status(400).json({ error: 'Security passcode must be at least 3 characters.' });
+  }
+
+  const key = cleanName.toLowerCase();
+  if (users[key]) {
+    return res.status(409).json({ error: 'Pilot callsign is already registered. Please log in.' });
+  }
+
+  const userData = initialData || {};
+  users[key] = {
+    username: cleanName,
+    passcode: cleanPass,
+    data: {
+      ...userData,
+      username: cleanName,
+      isLoggedIn: true,
+    },
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  persistUsers();
+
+  // If score > 0, include on real-time leaderboard
+  if (userData.highScore > 0) {
+    const existingIdx = leaderboard.findIndex((e) => e.name.toLowerCase() === cleanName.toLowerCase());
+    if (existingIdx >= 0) {
+      leaderboard[existingIdx].score = Math.max(leaderboard[existingIdx].score, userData.highScore);
+    } else {
+      leaderboard.push({
+        id: String(Date.now()),
+        name: cleanName,
+        character: userData.selectedCharacter || 'Neon Ninja',
+        score: userData.highScore,
+        stage: userData.maxStageUnlocked || 1,
+        wins: userData.multiplayerWins || 0,
+        date: 'Just now',
+      });
+      persistLeaderboard();
+    }
+  }
+
+  res.json({
+    success: true,
+    message: `Pilot ${cleanName} successfully registered!`,
+    profile: users[key].data,
+  });
+});
+
+// Pilot Authentication: Login Existing Pilot
+app.post('/api/auth/login', (req, res) => {
+  const { username, password } = req.body || {};
+  const cleanName = (username || '').trim();
+  const cleanPass = (password || '').trim();
+
+  if (!cleanName || !cleanPass) {
+    return res.status(400).json({ error: 'Callsign and passcode are required.' });
+  }
+
+  const key = cleanName.toLowerCase();
+  const user = users[key];
+  if (!user) {
+    return res.status(404).json({ error: 'Pilot callsign not found. Please create an identity first.' });
+  }
+
+  if (user.passcode !== cleanPass) {
+    return res.status(401).json({ error: 'Incorrect security passcode.' });
+  }
+
+  res.json({
+    success: true,
+    message: `Welcome back, Pilot ${user.username}!`,
+    profile: user.data,
+  });
+});
+
+// Profile REST endpoints
 app.get('/api/profile/:username', (req, res) => {
   const username = req.params.username.toLowerCase();
-  const profile = playerProfiles[username] || null;
-  res.json({ success: true, profile });
+  const user = users[username];
+  res.json({ success: true, profile: user ? user.data : null });
 });
 
 app.post('/api/profile/save', (req, res) => {
-  const { username, data } = req.body;
+  const { username, data } = req.body || {};
   if (!username || !data) {
     return res.status(400).json({ error: 'Invalid payload' });
   }
-  playerProfiles[username.toLowerCase()] = {
-    ...data,
-    updatedAt: new Date().toISOString(),
-  };
-  res.json({ success: true });
-});
+  const key = username.toLowerCase();
+  if (users[key]) {
+    users[key].data = {
+      ...users[key].data,
+      ...data,
+      username: users[key].username, // keep canonical casing
+      isLoggedIn: true,
+    };
+    users[key].updatedAt = new Date().toISOString();
+  } else {
+    users[key] = {
+      username,
+      passcode: 'guest',
+      data: { ...data, username, isLoggedIn: true },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+  }
+  persistUsers();
 
-// --- FRONTEND CATCH-ALL ROUTE ---
-// Directs all root browser entries toward the Vite built HTML index file
-app.get('*', (_req, res) => {
-  res.sendFile(path.join(__dirname, '../dist', 'index.html'));
+  // Keep leaderboard in sync with player's latest high score
+  if (data.highScore > 0) {
+    const existingIdx = leaderboard.findIndex((e) => e.name.toLowerCase() === key);
+    if (existingIdx >= 0) {
+      if (data.highScore > leaderboard[existingIdx].score) {
+        leaderboard[existingIdx].score = data.highScore;
+        leaderboard[existingIdx].stage = Math.max(leaderboard[existingIdx].stage, data.maxStageUnlocked || 1);
+        leaderboard[existingIdx].date = 'Today';
+      }
+    } else {
+      leaderboard.push({
+        id: String(Date.now()),
+        name: users[key].username,
+        character: data.selectedCharacter || 'Neon Ninja',
+        score: data.highScore,
+        stage: data.maxStageUnlocked || 1,
+        wins: data.multiplayerWins || 0,
+        date: 'Today',
+      });
+    }
+    persistLeaderboard();
+  }
+
+  res.json({ success: true });
 });
 
 // WebSocket Server for Real-Time Multiplayer
@@ -143,7 +303,7 @@ interface Room {
   stage: number;
   status: 'waiting' | 'countdown' | 'racing' | 'ended';
   players: Map<string, PlayerState>;
-  countdown?: number;
+  countdownTimer?: NodeJS.Timeout;
 }
 
 const rooms = new Map<string, Room>();
@@ -198,9 +358,29 @@ function getRoomSnapshot(room: Room) {
   };
 }
 
+function removePlayerFromRoom(roomCode: string, playerId: string) {
+  const room = rooms.get(roomCode);
+  if (!room) return;
+
+  room.players.delete(playerId);
+  if (room.players.size === 0) {
+    if (room.countdownTimer) clearInterval(room.countdownTimer);
+    rooms.delete(roomCode);
+  } else {
+    if (room.hostId === playerId) {
+      const nextHostId = room.players.keys().next().value;
+      if (nextHostId) room.hostId = nextHostId;
+    }
+    broadcastToRoom(room, {
+      type: 'ROOM_UPDATE',
+      payload: { room: getRoomSnapshot(room) },
+    });
+  }
+}
+
 wss.on('connection', (ws) => {
   let currentRoomCode: string | null = null;
-  let playerId = 'p_' + Math.random().toString(36).substring(2, 9);
+  const playerId = 'p_' + Math.random().toString(36).substring(2, 9);
 
   ws.on('message', (raw) => {
     try {
@@ -209,6 +389,10 @@ wss.on('connection', (ws) => {
 
       switch (type) {
         case 'CREATE_ROOM': {
+          if (currentRoomCode) {
+            removePlayerFromRoom(currentRoomCode, playerId);
+          }
+
           const roomCode = generateRoomCode();
           const room: Room = {
             code: roomCode,
@@ -266,6 +450,10 @@ wss.on('connection', (ws) => {
             return;
           }
 
+          if (currentRoomCode) {
+            removePlayerFromRoom(currentRoomCode, playerId);
+          }
+
           const player: PlayerState = {
             ws,
             id: playerId,
@@ -287,18 +475,299 @@ wss.on('connection', (ws) => {
           room.players.set(playerId, player);
           currentRoomCode = code;
 
-          broadcastToRoom(room, { type: 'PLAYER_JOINED', payload: { room: getRoomSnapshot(room) } });
-          ws.send(JSON.stringify({ type: 'JOIN_SUCCESS', payload: { room: getRoomSnapshot(room), yourId: playerId } }));
+          const snapshot = getRoomSnapshot(room);
+          ws.send(JSON.stringify({
+            type: 'ROOM_JOINED',
+            payload: { room: snapshot, yourId: playerId },
+          }));
+          broadcastToRoom(room, {
+            type: 'ROOM_UPDATE',
+            payload: { room: snapshot },
+          }, playerId);
           break;
         }
+
+        case 'QUICK_MATCH': {
+          if (currentRoomCode) {
+            removePlayerFromRoom(currentRoomCode, playerId);
+          }
+
+          // Find waiting room with available slot
+          let targetRoom: Room | null = null;
+          for (const r of rooms.values()) {
+            if (r.status === 'waiting' && r.players.size < 4) {
+              targetRoom = r;
+              break;
+            }
+          }
+
+          if (targetRoom) {
+            const player: PlayerState = {
+              ws,
+              id: playerId,
+              name: payload?.name || `Racer ${targetRoom.players.size + 1}`,
+              character: payload?.character || 'Cyber Punk',
+              ready: true,
+              x: 50,
+              y: 0,
+              vx: 0,
+              vy: 0,
+              progress: 0,
+              spriteState: 'idle',
+              facing: 'right',
+              health: 100,
+              score: 0,
+              finished: false,
+            };
+
+            targetRoom.players.set(playerId, player);
+            currentRoomCode = targetRoom.code;
+
+            const snapshot = getRoomSnapshot(targetRoom);
+            ws.send(JSON.stringify({
+              type: 'ROOM_JOINED',
+              payload: { room: snapshot, yourId: playerId },
+            }));
+            broadcastToRoom(targetRoom, {
+              type: 'ROOM_UPDATE',
+              payload: { room: snapshot },
+            }, playerId);
+          } else {
+            // Create new room
+            const roomCode = generateRoomCode();
+            const room: Room = {
+              code: roomCode,
+              hostId: playerId,
+              stage: payload?.stage || 1,
+              status: 'waiting',
+              players: new Map(),
+            };
+
+            const player: PlayerState = {
+              ws,
+              id: playerId,
+              name: payload?.name || 'Racer 1',
+              character: payload?.character || 'Neon Ninja',
+              ready: true,
+              x: 50,
+              y: 0,
+              vx: 0,
+              vy: 0,
+              progress: 0,
+              spriteState: 'idle',
+              facing: 'right',
+              health: 100,
+              score: 0,
+              finished: false,
+            };
+
+            room.players.set(playerId, player);
+            rooms.set(roomCode, room);
+            currentRoomCode = roomCode;
+
+            ws.send(JSON.stringify({
+              type: 'ROOM_CREATED',
+              payload: { room: getRoomSnapshot(room), yourId: playerId },
+            }));
+          }
+          break;
+        }
+
+        case 'SET_READY': {
+          if (!currentRoomCode) return;
+          const room = rooms.get(currentRoomCode);
+          if (!room) return;
+
+          const player = room.players.get(playerId);
+          if (player) {
+            player.ready = Boolean(payload?.ready);
+            broadcastToRoom(room, {
+              type: 'ROOM_UPDATE',
+              payload: { room: getRoomSnapshot(room) },
+            });
+          }
+          break;
+        }
+
+        case 'START_MATCH': {
+          if (!currentRoomCode) return;
+          const room = rooms.get(currentRoomCode);
+          if (!room || room.hostId !== playerId) return;
+
+          if (payload?.stage) {
+            room.stage = payload.stage;
+          }
+
+          room.status = 'countdown';
+          let countdown = 3;
+          broadcastToRoom(room, {
+            type: 'MATCH_COUNTDOWN',
+            payload: { seconds: countdown },
+          });
+
+          if (room.countdownTimer) clearInterval(room.countdownTimer);
+          room.countdownTimer = setInterval(() => {
+            countdown--;
+            if (countdown <= 0) {
+              if (room.countdownTimer) clearInterval(room.countdownTimer);
+              room.status = 'racing';
+              room.players.forEach((p) => {
+                p.x = 50;
+                p.y = 0;
+                p.vx = 0;
+                p.vy = 0;
+                p.progress = 0;
+                p.health = 100;
+                p.score = 0;
+                p.finished = false;
+                delete p.finishTime;
+              });
+              broadcastToRoom(room, {
+                type: 'MATCH_STARTED',
+                payload: { room: getRoomSnapshot(room) },
+              });
+            } else {
+              broadcastToRoom(room, {
+                type: 'MATCH_COUNTDOWN',
+                payload: { seconds: countdown },
+              });
+            }
+          }, 1000);
+          break;
+        }
+
+        case 'UPDATE_STATE': {
+          if (!currentRoomCode) return;
+          const room = rooms.get(currentRoomCode);
+          if (!room || room.status !== 'racing') return;
+
+          const player = room.players.get(playerId);
+          if (player && payload) {
+            player.x = payload.x ?? player.x;
+            player.y = payload.y ?? player.y;
+            player.vx = payload.vx ?? player.vx;
+            player.vy = payload.vy ?? player.vy;
+            player.progress = payload.progress ?? player.progress;
+            player.spriteState = payload.spriteState ?? player.spriteState;
+            player.facing = payload.facing ?? player.facing;
+            player.health = payload.health ?? player.health;
+            player.score = payload.score ?? player.score;
+            player.activePowerups = payload.activePowerups ?? player.activePowerups;
+
+            broadcastToRoom(room, {
+              type: 'PLAYER_MOVED',
+              payload: {
+                id: playerId,
+                name: player.name,
+                character: player.character,
+                ...payload,
+              },
+            }, playerId);
+          }
+          break;
+        }
+
+        case 'USE_POWERUP': {
+          if (!currentRoomCode) return;
+          const room = rooms.get(currentRoomCode);
+          if (!room) return;
+
+          broadcastToRoom(room, {
+            type: 'POWERUP_TRIGGERED',
+            payload: { playerId, powerup: payload?.powerup },
+          }, playerId);
+          break;
+        }
+
+        case 'PLAYER_FINISH': {
+          if (!currentRoomCode) return;
+          const room = rooms.get(currentRoomCode);
+          if (!room) return;
+
+          const player = room.players.get(playerId);
+          if (player) {
+            player.finished = true;
+            player.finishTime = payload?.finishTime || Date.now();
+
+            const snapshot = getRoomSnapshot(room);
+            broadcastToRoom(room, {
+              type: 'PLAYER_FINISHED',
+              payload: { room: snapshot },
+            });
+
+            // Check if all players finished
+            const allFinished = Array.from(room.players.values()).every((p) => p.finished);
+            if (allFinished) {
+              room.status = 'ended';
+              broadcastToRoom(room, {
+                type: 'MATCH_ENDED',
+                payload: { room: getRoomSnapshot(room) },
+              });
+            }
+          }
+          break;
+        }
+
+        case 'EMOTE': {
+          if (!currentRoomCode) return;
+          const room = rooms.get(currentRoomCode);
+          if (!room) return;
+
+          broadcastToRoom(room, {
+            type: 'EMOTE_RECEIVED',
+            payload: { playerId, emote: payload?.emote },
+          });
+          break;
+        }
+
+        case 'LEAVE_ROOM': {
+          if (currentRoomCode) {
+            removePlayerFromRoom(currentRoomCode, playerId);
+            currentRoomCode = null;
+          }
+          break;
+        }
+
+        default:
+          break;
       }
     } catch (err) {
-      console.error(err);
+      console.error('Error handling WebSocket message:', err);
+    }
+  });
+
+  ws.on('close', () => {
+    if (currentRoomCode) {
+      removePlayerFromRoom(currentRoomCode, playerId);
+      currentRoomCode = null;
     }
   });
 });
 
-const port = process.env.PORT || 10000;
-server.listen(port, () => {
-  console.log(`Server listening on port ${port}`);
+// Vite Middleware for Dev / Static Files for Prod
+const isProduction = process.env.NODE_ENV === 'production';
+
+async function setupFrontend() {
+  if (!isProduction) {
+    const { createServer: createViteServer } = await import('vite');
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: 'spa',
+    });
+    app.use(vite.middlewares);
+  } else {
+    const distPath = path.resolve(process.cwd(), 'dist');
+    app.use(express.static(distPath));
+    app.get('*', (_req, res) => {
+      res.sendFile(path.resolve(distPath, 'index.html'));
+    });
+  }
+}
+
+await setupFrontend();
+
+// Port 3000 on host 0.0.0.0 is the required binding for AI Studio
+const PORT = 3000;
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`Neon Dash server listening on http://0.0.0.0:${PORT}`);
 });

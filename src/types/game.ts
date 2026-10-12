@@ -93,25 +93,6 @@ export interface CapeDef {
   icon: string;
 }
 
-export type VehicleId = 'none' | 'hoverbike' | 'cyber_car' | 'spaceship' | 'cyber_truck';
-
-export interface VehicleDef {
-  id: VehicleId;
-  name: string;
-  tagline: string;
-  requiredLevel: number;
-  cost: number;
-  speedMultiplier: number;
-  jumpBoost: number;
-  ramPower: boolean;
-  vtolFlight: boolean;
-  description: string;
-  perk: string;
-  primaryColor: string;
-  glowColor: string;
-  icon: string;
-}
-
 export type GadgetId = 'combat_drone' | 'quantum_jetpack' | 'med_cross' | 'sprint_boots' | 'graviton_magnet';
 
 export interface GadgetDef {
@@ -144,8 +125,6 @@ export interface PlayerStats {
   unlockedWeapons: WeaponId[];
   equippedCape: CapeId;
   unlockedCapes: CapeId[];
-  equippedVehicle?: VehicleId;
-  unlockedVehicles?: VehicleId[];
   equippedGadget?: GadgetId;
   unlockedGadgets?: GadgetId[];
   powerUpLevels: Record<PowerUpType, number>;
@@ -214,6 +193,7 @@ export interface Particle {
   gravity?: number;
   growth?: number;
   lineWidth?: number;
+  text?: string;
 }
 
 export interface LevelConfig {
@@ -226,6 +206,8 @@ export interface LevelConfig {
   gravity: number;
   bossPresent?: boolean;
   bossHealth?: number;
+  bossName?: string;
+  isExtremeBoss?: boolean;
 }
 
 export interface RemotePlayer {

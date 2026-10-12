@@ -53,10 +53,14 @@ export const VictoryModal: React.FC<VictoryModalProps> = ({
         </div>
 
         <h2 className="text-2xl font-black tracking-wide text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-teal-200 to-fuchsia-400">
-          {isMultiplayer ? 'VICTORY ROYALE!' : 'STAGE CLEARED!'}
+          {isMultiplayer ? 'VICTORY ROYALE!' : stageNumber === 10 ? 'EXTREME BOSS DEFEATED!' : 'STAGE CLEARED!'}
         </h2>
         <p className="text-xs text-slate-400 font-mono mt-1">
-          {isMultiplayer ? 'You crossed the finish line first!' : `Sector 0${stageNumber} Completed`}
+          {isMultiplayer
+            ? 'You crossed the finish line first!'
+            : stageNumber === 10
+            ? 'FINAL SECTOR 10 CONQUERED! ALL SECTORS CLEARED!'
+            : `Sector 0${stageNumber} Completed`}
         </p>
 
         {/* Stats card */}

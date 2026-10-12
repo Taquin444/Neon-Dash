@@ -15,6 +15,7 @@ import { CharacterSelectModal } from './components/CharacterSelectModal';
 import { UpgradeShopModal } from './components/UpgradeShopModal';
 import { GameOverModal } from './components/GameOverModal';
 import { VictoryModal } from './components/VictoryModal';
+import { LoginPage } from './components/LoginPage';
 import { STAGES, CHARACTERS, calculatePlayerLevel } from './game/levelData';
 import { soundManager } from './audio/soundManager';
 import {
@@ -39,13 +40,13 @@ import {
   ChevronRight,
   Shield,
   Award,
-  Car,
   Bot,
+  LogOut,
 } from 'lucide-react';
 
 const INITIAL_STATS: PlayerStats = {
   username: 'CyberPilot',
-  isLoggedIn: true,
+  isLoggedIn: false, // Prompts user to log in / register or play as guest
   playerLevel: 1,
   xp: 0,
   xpToNextLevel: 500,
@@ -60,8 +61,6 @@ const INITIAL_STATS: PlayerStats = {
   unlockedWeapons: ['katana'],
   equippedCape: 'starter_scarf',
   unlockedCapes: ['starter_scarf'],
-  equippedVehicle: 'none',
-  unlockedVehicles: [],
   equippedGadget: 'combat_drone',
   unlockedGadgets: ['combat_drone'],
   powerUpLevels: {
@@ -87,8 +86,7 @@ export default function App() {
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [showGameOverModal, setShowGameOverModal] = useState(false);
   const [showVictoryModal, setShowVictoryModal] = useState(false);
-  const [upgradeShopTab, setUpgradeShopTab] = useState<'weapons' | 'capes' | 'vehicles' | 'gadgets' | 'powerups'>('weapons');
-  const [isVehicleMounted, setIsVehicleMounted] = useState(false);
+  const [upgradeShopTab, setUpgradeShopTab] = useState<'weapons' | 'capes' | 'gadgets' | 'powerups'>('weapons');
 
   // Stats & Progress
   const [stats, setStats] = useState<PlayerStats>(() => {
@@ -128,9 +126,20 @@ export default function App() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const engineRef = useRef<GameEngine | null>(null);
 
+  // Mutable refs for engine callbacks to prevent recreation/freezing
+  const statsRef = useRef(stats);
+  statsRef.current = stats;
+  const currentStageRef = useRef(currentStage);
+  currentStageRef.current = currentStage;
+  const wsRef = useRef(ws);
+  wsRef.current = ws;
+  const isMultiplayerMatchRef = useRef(isMultiplayerMatch);
+  isMultiplayerMatchRef.current = isMultiplayerMatch;
+
   // Save Stats Helper
   const saveStats = (newStats: PlayerStats) => {
     setStats(newStats);
+    statsRef.current = newStats;
     try {
       localStorage.setItem('neon_dash_player_stats', JSON.stringify(newStats));
       fetch('/api/profile/save', {
@@ -145,12 +154,13 @@ export default function App() {
 
   // Submit Score Helper
   const submitScore = (finalScore: number, finalStage: number, isWin: boolean = false) => {
-    const updatedWins = stats.multiplayerWins + (isWin ? 1 : 0);
-    const updatedHighScore = Math.max(stats.highScore, finalScore);
-    const updatedStage = Math.max(stats.maxStageUnlocked, finalStage);
+    const currentS = statsRef.current;
+    const updatedWins = currentS.multiplayerWins + (isWin ? 1 : 0);
+    const updatedHighScore = Math.max(currentS.highScore, finalScore);
+    const updatedStage = Math.max(currentS.maxStageUnlocked, finalStage);
 
     const updated = {
-      ...stats,
+      ...currentS,
       highScore: updatedHighScore,
       maxStageUnlocked: updatedStage,
       multiplayerWins: updatedWins,
@@ -161,8 +171,8 @@ export default function App() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        name: stats.username,
-        character: CHARACTERS.find((c) => c.id === stats.selectedCharacter)?.name || 'Neon Ninja',
+        name: currentS.username,
+        character: CHARACTERS.find((c) => c.id === currentS.selectedCharacter)?.name || 'Neon Ninja',
         score: updatedHighScore,
         stage: updatedStage,
         wins: updatedWins,
@@ -170,7 +180,7 @@ export default function App() {
     }).catch(() => {});
   };
 
-  // Initialize Game Engine
+  // Initialize Game Engine (Instantiated once to avoid freeze or desync)
   useEffect(() => {
     if (!canvasRef.current) return;
 
@@ -185,25 +195,27 @@ export default function App() {
         setShowGameOverModal(true);
         setLastXpEarned(xpEarned || 50);
 
-        const newTotalCoins = stats.coins + finalCoins;
-        const newTotalXp = (stats.xp || 0) + (xpEarned || 50);
+        const currentS = statsRef.current;
+        const stageNow = currentStageRef.current;
+        const newTotalCoins = currentS.coins + finalCoins;
+        const newTotalXp = (currentS.xp || 0) + (xpEarned || 50);
         const levelData = calculatePlayerLevel(newTotalXp);
-        const didLevelUp = levelData.level > (stats.playerLevel || 1);
+        const didLevelUp = levelData.level > (currentS.playerLevel || 1);
 
         const updated: PlayerStats = {
-          ...stats,
+          ...currentS,
           coins: newTotalCoins,
           xp: newTotalXp,
           playerLevel: levelData.level,
         };
         saveStats(updated);
-        submitScore(finalScore, currentStage, false);
+        submitScore(finalScore, stageNow, false);
 
         if (didLevelUp) {
           soundManager.playVictory();
           setLevelUpAlert({
             level: levelData.level,
-            message: `Reached Level ${levelData.level}! Check Cyber Armory for newly unlocked weapons & capes.`,
+            message: `Reached Level ${levelData.level}! Check Cyber Armory for newly unlocked weapons & power-ups.`,
           });
           setTimeout(() => setLevelUpAlert(null), 4500);
         }
@@ -213,58 +225,60 @@ export default function App() {
         setShowVictoryModal(true);
         setLastXpEarned(xpEarned || 350);
 
-        const newTotalCoins = stats.coins + finalCoins + 100; // 100 stage clear bonus
-        const nextStage = Math.min(5, currentStage + 1);
-        const updatedMaxStage = Math.max(stats.maxStageUnlocked, nextStage);
-        const newTotalXp = (stats.xp || 0) + (xpEarned || 350);
+        const currentS = statsRef.current;
+        const stageNow = currentStageRef.current;
+        const newTotalCoins = currentS.coins + finalCoins + 100; // 100 stage clear bonus
+        const nextStage = Math.min(STAGES.length, stageNow + 1);
+        const updatedMaxStage = Math.max(currentS.maxStageUnlocked, nextStage);
+        const newTotalXp = (currentS.xp || 0) + (xpEarned || 350);
         const levelData = calculatePlayerLevel(newTotalXp);
-        const didLevelUp = levelData.level > (stats.playerLevel || 1);
+        const didLevelUp = levelData.level > (currentS.playerLevel || 1);
 
         const updated: PlayerStats = {
-          ...stats,
+          ...currentS,
           coins: newTotalCoins,
           maxStageUnlocked: updatedMaxStage,
           xp: newTotalXp,
           playerLevel: levelData.level,
         };
         saveStats(updated);
-        submitScore(finalScore, currentStage, isMultiplayerMatch);
+        submitScore(finalScore, stageNow, isMultiplayerMatchRef.current);
 
         if (didLevelUp) {
           soundManager.playVictory();
           setLevelUpAlert({
             level: levelData.level,
-            message: `Reached Level ${levelData.level}! Check Cyber Armory for newly unlocked weapons & capes.`,
+            message: `Reached Level ${levelData.level}! Check Cyber Armory for newly unlocked weapons & power-ups.`,
           });
           setTimeout(() => setLevelUpAlert(null), 4500);
         }
 
         // Notify multiplayer server if racing
-        if (isMultiplayerMatch && ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({
+        const socket = wsRef.current;
+        if (isMultiplayerMatchRef.current && socket && socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({
             type: 'PLAYER_FINISH',
             payload: { finishTime: Date.now() },
           }));
         }
       },
       onSendState: (statePayload) => {
-        if (ws && ws.readyState === WebSocket.OPEN && isMultiplayerMatch) {
-          ws.send(JSON.stringify({
+        const socket = wsRef.current;
+        if (socket && socket.readyState === WebSocket.OPEN && isMultiplayerMatchRef.current) {
+          socket.send(JSON.stringify({
             type: 'UPDATE_STATE',
             payload: statePayload,
           }));
         }
       },
       onUsePowerup: (powerupType) => {
-        if (ws && ws.readyState === WebSocket.OPEN && isMultiplayerMatch) {
-          ws.send(JSON.stringify({
+        const socket = wsRef.current;
+        if (socket && socket.readyState === WebSocket.OPEN && isMultiplayerMatchRef.current) {
+          socket.send(JSON.stringify({
             type: 'USE_POWERUP',
             payload: { powerup: powerupType },
           }));
         }
-      },
-      onVehicleMountChange: (mounted) => {
-        setIsVehicleMounted(mounted);
       },
     });
 
@@ -274,7 +288,7 @@ export default function App() {
       engine.destroy();
       engineRef.current = null;
     };
-  }, [stats, currentStage, isMultiplayerMatch, ws]);
+  }, []);
 
   // WebSocket Setup
   useEffect(() => {
@@ -411,7 +425,8 @@ export default function App() {
 
   // Start Race Action
   const startRace = (stageNum: number, isMultiplayer: boolean = false) => {
-    setCurrentStage(stageNum);
+    const validStage = Math.max(1, Math.min(STAGES.length, stageNum));
+    setCurrentStage(validStage);
     setIsPlaying(true);
     setIsPaused(false);
     setShowGameOverModal(false);
@@ -420,16 +435,14 @@ export default function App() {
 
     if (engineRef.current) {
       engineRef.current.initStage(
-        stageNum,
+        validStage,
         stats.selectedCharacter,
         isMultiplayer,
         stats.powerUpLevels,
         stats.equippedWeapon || 'katana',
         stats.equippedCape || 'starter_scarf',
-        stats.equippedVehicle || 'none',
         stats.equippedGadget || 'combat_drone'
       );
-      setIsVehicleMounted(Boolean(stats.equippedVehicle && stats.equippedVehicle !== 'none'));
       engineRef.current.start();
     }
   };
@@ -456,9 +469,6 @@ export default function App() {
     },
     powerup: () => {
       if (engineRef.current) engineRef.current.triggerInventoryPowerup();
-    },
-    mount: () => {
-      if (engineRef.current) engineRef.current.toggleVehicleMount();
     },
   };
 
@@ -732,6 +742,16 @@ export default function App() {
         ))}
       </div>
 
+      {/* 0. Dedicated Pilot Login / Identification Page */}
+      {!stats.isLoggedIn && (
+        <LoginPage
+          onLoginSuccess={(newStats) => {
+            saveStats(newStats);
+          }}
+          initialStats={INITIAL_STATS}
+        />
+      )}
+
       {/* 4. Active In-Game Heads-Up Display & Touch Controls */}
       {isPlaying ? (
         <>
@@ -749,18 +769,9 @@ export default function App() {
             isMultiplayer={isMultiplayerMatch}
             remotePlayers={remotePlayersList}
             onSendEmote={handleSendEmote}
-            equippedVehicle={stats.equippedVehicle}
             equippedGadget={stats.equippedGadget}
-            isVehicleMounted={isVehicleMounted}
-            onToggleVehicleMount={() => {
-              if (engineRef.current) engineRef.current.toggleVehicleMount();
-            }}
           />
-          <TouchControls
-            onInput={touchInputHandlers}
-            hasVehicle={Boolean(stats.equippedVehicle && stats.equippedVehicle !== 'none')}
-            isMounted={isVehicleMounted}
-          />
+          <TouchControls onInput={touchInputHandlers} />
         </>
       ) : (
         /* 5. Main Menu / Cyber Command Hub */
@@ -768,37 +779,54 @@ export default function App() {
           {/* Top Bar: Profile & Currency */}
           <div className="flex justify-between items-center">
             {/* Player Profile Quick Card */}
-            <button
-              onClick={() => setShowAuthModal(true)}
-              className="flex items-center gap-3 bg-slate-900/90 border border-slate-800 hover:border-cyan-500/50 p-2 sm:px-3 rounded-2xl cursor-pointer transition-all shadow-md group"
-            >
-              <div
-                className="w-10 h-10 rounded-xl flex items-center justify-center font-black text-sm shadow-inner"
-                style={{
-                  backgroundColor: `${activeHero.primaryColor}25`,
-                  border: `1.5px solid ${activeHero.primaryColor}`,
-                  color: activeHero.primaryColor,
-                }}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowAuthModal(true)}
+                className="flex items-center gap-3 bg-slate-900/90 border border-slate-800 hover:border-cyan-500/50 p-2 sm:px-3 rounded-2xl cursor-pointer transition-all shadow-md group"
               >
-                {activeHero.name[0]}
-              </div>
-              <div className="text-left pr-2">
-                <div className="flex items-center gap-1.5">
-                  <span className="font-bold text-sm text-white group-hover:text-cyan-300 transition-colors">
-                    {stats.username}
-                  </span>
-                  <span className="text-[9px] font-mono bg-fuchsia-950 text-fuchsia-400 px-1.5 py-0.5 rounded border border-fuchsia-800 font-bold">
-                    LVL {stats.playerLevel || 1}
-                  </span>
-                  <span className="text-[9px] font-mono bg-cyan-950 text-cyan-400 px-1 py-0.2 rounded border border-cyan-800">
-                    STAGE {stats.maxStageUnlocked}
-                  </span>
+                <div
+                  className="w-10 h-10 rounded-xl flex items-center justify-center font-black text-sm shadow-inner"
+                  style={{
+                    backgroundColor: `${activeHero.primaryColor}25`,
+                    border: `1.5px solid ${activeHero.primaryColor}`,
+                    color: activeHero.primaryColor,
+                  }}
+                >
+                  {activeHero.name[0]}
                 </div>
-                <p className="text-[10px] text-slate-400 font-mono">
-                  {stats.multiplayerWins} W • High: {stats.highScore.toLocaleString()}
-                </p>
-              </div>
-            </button>
+                <div className="text-left pr-2">
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-bold text-sm text-white group-hover:text-cyan-300 transition-colors">
+                      {stats.username}
+                    </span>
+                    <span className="text-[9px] font-mono bg-fuchsia-950 text-fuchsia-400 px-1.5 py-0.5 rounded border border-fuchsia-800 font-bold">
+                      LVL {stats.playerLevel || 1}
+                    </span>
+                    <span className="text-[9px] font-mono bg-cyan-950 text-cyan-400 px-1 py-0.2 rounded border border-cyan-800 font-bold">
+                      STAGE {stats.maxStageUnlocked}/10
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-400 font-mono">
+                    {stats.multiplayerWins} W • High: {stats.highScore.toLocaleString()}
+                  </p>
+                </div>
+              </button>
+
+              <button
+                onClick={() => {
+                  const loggedOut = { ...stats, isLoggedIn: false };
+                  setStats(loggedOut);
+                  try {
+                    localStorage.setItem('neon_dash_player_stats', JSON.stringify(loggedOut));
+                  } catch {}
+                }}
+                className="p-2 sm:px-2.5 sm:py-2 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-slate-800 hover:border-rose-500/50 text-slate-400 hover:text-rose-400 text-[10px] font-mono transition-colors cursor-pointer flex items-center gap-1 shadow-md"
+                title="Log out or switch pilot identity"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">SWITCH</span>
+              </button>
+            </div>
 
             {/* Currency & Audio */}
             <div className="flex items-center gap-2">
@@ -823,7 +851,7 @@ export default function App() {
           <div className="my-auto max-w-lg mx-auto text-center py-4">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-cyan-500/30 bg-cyan-950/40 text-cyan-400 text-xs tracking-wider uppercase font-mono mb-3">
               <Zap className="w-3.5 h-3.5 animate-pulse" />
-              CYBERNETIC SPEED RUNNER
+              CYBERNETIC SPEED RUNNER • 10 ESCALATING SECTORS
             </div>
 
             <h1 className="text-4xl sm:text-6xl font-black tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-teal-200 to-fuchsia-400 drop-shadow-[0_0_30px_rgba(0,245,212,0.3)]">
@@ -831,7 +859,7 @@ export default function App() {
             </h1>
 
             <p className="text-xs sm:text-sm text-slate-300 font-mono mt-2 max-w-md mx-auto">
-              Sprint through cyberpunk sectors, shatter drone sentinels, collect power-ups, and challenge racers in real-time!
+              Sprint through 10 escalating cyberpunk sectors, duel mini-bosses, annihilate the Stage 10 Extreme Colossus, and race rivals in real-time!
             </p>
 
             {/* Launch Buttons */}
@@ -839,10 +867,14 @@ export default function App() {
               {/* Solo Campaign Play */}
               <button
                 onClick={() => startRace(currentStage, false)}
-                className="w-full sm:w-auto py-4 px-8 rounded-2xl font-black text-sm tracking-wider uppercase text-slate-950 bg-gradient-to-r from-cyan-400 via-teal-300 to-fuchsia-400 shadow-[0_0_30px_rgba(0,245,212,0.5)] hover:brightness-110 active:scale-95 transition-all flex items-center justify-center gap-3 cursor-pointer"
+                className={`w-full sm:w-auto py-4 px-8 rounded-2xl font-black text-sm tracking-wider uppercase text-slate-950 shadow-[0_0_30px_rgba(0,245,212,0.5)] hover:brightness-110 active:scale-95 transition-all flex items-center justify-center gap-3 cursor-pointer ${
+                  currentStage === 10
+                    ? 'bg-gradient-to-r from-amber-400 via-rose-400 to-fuchsia-500 shadow-[0_0_35px_rgba(251,191,36,0.6)]'
+                    : 'bg-gradient-to-r from-cyan-400 via-teal-300 to-fuchsia-400'
+                }`}
               >
                 <Play className="w-5 h-5 fill-current" />
-                PLAY STAGE {currentStage}
+                {currentStage === 10 ? 'CHALLENGE STAGE 10 EXTREME BOSS' : `PLAY STAGE ${currentStage}`}
               </button>
 
               {/* Competitive Multiplayer Versus */}
@@ -858,18 +890,18 @@ export default function App() {
 
           {/* Bottom Navigation & Stage Carousel */}
           <div className="space-y-4">
-            {/* Stage Selector Grid */}
-            <div className="bg-slate-900/80 border border-slate-800 p-2.5 rounded-2xl backdrop-blur-md max-w-xl mx-auto">
+            {/* Stage Selector Grid - All 10 Stages */}
+            <div className="bg-slate-900/80 border border-slate-800 p-2.5 rounded-2xl backdrop-blur-md max-w-2xl mx-auto">
               <div className="flex items-center justify-between px-2 mb-2">
-                <span className="text-[11px] font-mono text-cyan-400 uppercase tracking-wider">
-                  SELECT SECTOR
+                <span className="text-[11px] font-mono text-cyan-400 uppercase tracking-wider font-bold">
+                  SELECT SECTOR (1 - 10)
                 </span>
                 <span className="text-[10px] text-slate-400 font-mono">
-                  {stats.maxStageUnlocked}/5 Unlocked
+                  {stats.maxStageUnlocked}/10 Unlocked
                 </span>
               </div>
 
-              <div className="grid grid-cols-5 gap-1.5">
+              <div className="grid grid-cols-5 sm:grid-cols-10 gap-1.5">
                 {STAGES.map((s) => {
                   const isUnlocked = s.stage <= stats.maxStageUnlocked;
                   const isSelected = s.stage === currentStage;
@@ -881,17 +913,23 @@ export default function App() {
                         soundManager.playJump();
                         setCurrentStage(s.stage);
                       }}
-                      className={`py-2 px-1 rounded-xl text-center border transition-all cursor-pointer flex flex-col items-center justify-center ${
+                      className={`py-2 px-1 rounded-xl text-center border transition-all cursor-pointer flex flex-col items-center justify-center relative ${
                         isSelected
-                          ? 'bg-cyan-500 text-slate-950 font-bold border-cyan-400 shadow-[0_0_15px_rgba(0,245,212,0.4)]'
+                          ? s.isExtremeBoss
+                            ? 'bg-gradient-to-r from-amber-400 to-rose-500 text-slate-950 font-black border-amber-300 shadow-[0_0_20px_rgba(251,191,36,0.6)]'
+                            : 'bg-cyan-500 text-slate-950 font-bold border-cyan-400 shadow-[0_0_15px_rgba(0,245,212,0.4)]'
                           : isUnlocked
-                          ? 'bg-slate-950/80 hover:bg-slate-800 text-slate-200 border-slate-800'
+                          ? s.isExtremeBoss
+                            ? 'bg-amber-950/40 hover:bg-amber-900/50 text-amber-300 border-amber-500/50'
+                            : 'bg-slate-950/80 hover:bg-slate-800 text-slate-200 border-slate-800'
                           : 'bg-slate-950/40 text-slate-600 border-slate-900 cursor-not-allowed opacity-60'
                       }`}
                     >
-                      <span className="text-xs font-black font-mono">S0{s.stage}</span>
-                      <span className="text-[9px] truncate max-w-full px-0.5">
-                        {isUnlocked ? (s.bossPresent ? 'BOSS' : `${s.trackLength}m`) : 'LOCKED'}
+                      <span className="text-xs font-black font-mono">
+                        {s.stage === 10 ? 'S10 ★' : `S0${s.stage}`}
+                      </span>
+                      <span className="text-[8px] truncate max-w-full px-0.5 uppercase font-mono font-bold">
+                        {isUnlocked ? (s.isExtremeBoss ? 'EXTREME' : 'BOSS') : 'LOCKED'}
                       </span>
                     </button>
                   );
@@ -899,7 +937,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* Menu Bar: Heroes, Armory, Cyber Garage, Tech Lab, Leaderboard */}
+            {/* Menu Bar: Heroes, Armory (Weapons), Power-Ups, Leaderboard */}
             <div className="flex items-center justify-center gap-2 sm:gap-2.5 flex-wrap">
               <button
                 onClick={() => setShowCharacterModal(true)}
@@ -917,29 +955,18 @@ export default function App() {
                 className="py-2 px-3 sm:px-3.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-slate-800 text-xs font-bold text-slate-200 flex items-center gap-1.5 cursor-pointer transition-colors shadow-sm"
               >
                 <Swords className="w-4 h-4 text-fuchsia-400" />
-                ARMORY
+                WEAPONS & ARMORY
               </button>
 
               <button
                 onClick={() => {
-                  setUpgradeShopTab('vehicles');
+                  setUpgradeShopTab('powerups');
                   setShowUpgradeModal(true);
                 }}
-                className="py-2 px-3 sm:px-3.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-teal-500/40 text-xs font-bold text-teal-300 flex items-center gap-1.5 cursor-pointer transition-colors shadow-sm"
+                className="py-2 px-3 sm:px-3.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-amber-500/40 text-xs font-bold text-amber-300 flex items-center gap-1.5 cursor-pointer transition-colors shadow-sm"
               >
-                <Car className="w-4 h-4 text-teal-400" />
-                CYBER GARAGE ({stats.unlockedVehicles?.length || 0}/4)
-              </button>
-
-              <button
-                onClick={() => {
-                  setUpgradeShopTab('gadgets');
-                  setShowUpgradeModal(true);
-                }}
-                className="py-2 px-3 sm:px-3.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-emerald-500/40 text-xs font-bold text-emerald-300 flex items-center gap-1.5 cursor-pointer transition-colors shadow-sm"
-              >
-                <Bot className="w-4 h-4 text-emerald-400" />
-                TECH LAB
+                <Zap className="w-4 h-4 text-amber-400" />
+                POWER-UPS
               </button>
 
               <button
@@ -947,7 +974,7 @@ export default function App() {
                 className="py-2 px-3 sm:px-3.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-slate-800 text-xs font-bold text-slate-200 flex items-center gap-1.5 cursor-pointer transition-colors shadow-sm"
               >
                 <Trophy className="w-4 h-4 text-amber-400" />
-                LEADERBOARDS
+                LEADERBOARD
               </button>
             </div>
           </div>
@@ -1082,22 +1109,7 @@ export default function App() {
             equippedCape: id,
           });
         }}
-        onPurchaseVehicle={(id, cost) => {
-          saveStats({
-            ...stats,
-            coins: stats.coins - cost,
-            unlockedVehicles: [...(stats.unlockedVehicles || []), id],
-            equippedVehicle: id,
-          });
-          setIsVehicleMounted(true);
-        }}
-        onEquipVehicle={(id) => {
-          saveStats({
-            ...stats,
-            equippedVehicle: id,
-          });
-          setIsVehicleMounted(true);
-        }}
+
         onPurchaseGadget={(id, cost) => {
           saveStats({
             ...stats,
