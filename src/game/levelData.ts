@@ -129,9 +129,9 @@ export const GADGETS: GadgetDef[] = [
     name: 'Tactical Combat Drone',
     requiredLevel: 2,
     cost: 450,
-    category: 'offensive',
-    description: 'Companion drone flying beside you. Automatically locks onto upcoming obstacles, drones, and boss orbs, firing cyan laser bursts!',
-    perk: 'Auto-Targeting Laser Sentry (1.4s fire rate)',
+    category: 'utility',
+    description: 'A tactical companion drone that follows your pilot into combat. It adds visual support without firing for you—every shot is yours to command.',
+    perk: 'Companion Drone (manual combat only)',
     color: '#00f5d4',
     icon: '🛸',
   },
@@ -502,6 +502,8 @@ export const POWER_UPS: PowerUpDef[] = [
   },
 ];
 
+export const WAVES_PER_STAGE = 5;
+
 export const STAGES: LevelConfig[] = [
   {
     stage: 1,
@@ -511,10 +513,6 @@ export const STAGES: LevelConfig[] = [
     bgTheme: 'cyber_metropolis',
     baseSpeed: 380,
     gravity: 1200,
-    bossPresent: true,
-    bossHealth: 450,
-    bossName: 'Cyber Scout Sentinel',
-    isExtremeBoss: false,
   },
   {
     stage: 2,
@@ -524,10 +522,6 @@ export const STAGES: LevelConfig[] = [
     bgTheme: 'circuit_grid',
     baseSpeed: 415,
     gravity: 1230,
-    bossPresent: true,
-    bossHealth: 650,
-    bossName: 'Firewall Enforcer Unit',
-    isExtremeBoss: false,
   },
   {
     stage: 3,
@@ -537,10 +531,6 @@ export const STAGES: LevelConfig[] = [
     bgTheme: 'magma_reactor',
     baseSpeed: 450,
     gravity: 1260,
-    bossPresent: true,
-    bossHealth: 900,
-    bossName: 'Pyro Titan Drone',
-    isExtremeBoss: false,
   },
   {
     stage: 4,
@@ -550,15 +540,11 @@ export const STAGES: LevelConfig[] = [
     bgTheme: 'orbital_apex',
     baseSpeed: 490,
     gravity: 1100, // Low gravity float!
-    bossPresent: true,
-    bossHealth: 1200,
-    bossName: 'Orbital Striker Mech',
-    isExtremeBoss: false,
   },
   {
     stage: 5,
     name: 'Quantum Void',
-    subtitle: 'Sector 05 - Abyssal Singularity',
+    subtitle: 'Sector 05 - Mini-Boss: Glitch Overlord Prime',
     trackLength: 6200,
     bgTheme: 'quantum_void',
     baseSpeed: 525,
@@ -576,10 +562,6 @@ export const STAGES: LevelConfig[] = [
     bgTheme: 'magma_reactor',
     baseSpeed: 560,
     gravity: 1350,
-    bossPresent: true,
-    bossHealth: 1900,
-    bossName: 'Bio-Mech Toxic Behemoth',
-    isExtremeBoss: false,
   },
   {
     stage: 7,
@@ -589,10 +571,6 @@ export const STAGES: LevelConfig[] = [
     bgTheme: 'cyber_metropolis',
     baseSpeed: 595,
     gravity: 1380,
-    bossPresent: true,
-    bossHealth: 2350,
-    bossName: 'Vanguard Dreadnought',
-    isExtremeBoss: false,
   },
   {
     stage: 8,
@@ -602,10 +580,6 @@ export const STAGES: LevelConfig[] = [
     bgTheme: 'circuit_grid',
     baseSpeed: 630,
     gravity: 1400,
-    bossPresent: true,
-    bossHealth: 2850,
-    bossName: 'Synapse Leviathan Core',
-    isExtremeBoss: false,
   },
   {
     stage: 9,
@@ -615,22 +589,18 @@ export const STAGES: LevelConfig[] = [
     bgTheme: 'orbital_apex',
     baseSpeed: 665,
     gravity: 1420,
-    bossPresent: true,
-    bossHealth: 3400,
-    bossName: 'Chronos Void Archon',
-    isExtremeBoss: false,
   },
   {
     stage: 10,
     name: 'OMEGA CYBER CORE',
-    subtitle: 'FINAL SECTOR - EXTREME APOCALYPTIC BOSS',
+    subtitle: 'FINAL SECTOR - 5X EXTREME APOCALYPTIC BOSS',
     trackLength: 11200,
     bgTheme: 'quantum_void',
     baseSpeed: 700,
     gravity: 1450,
     bossPresent: true,
-    bossHealth: 5000,
-    bossName: 'OMEGA CYBER COLOSSUS [EXTREME PROTOCOL]',
+    bossHealth: 7500,
+    bossName: 'OMEGA CYBER COLOSSUS [5X EXTREME PROTOCOL]',
     isExtremeBoss: true,
   },
 ];
@@ -775,9 +745,10 @@ export function generateLevelElements(stageNum: number): {
     segmentIndex++;
   }
 
-  // Ensure a safe start and a solid finish runway, even if generation changes later.
+  // Keep the combat arena floor continuous well beyond the generated hazard course.
+  // Stages end by clearing five enemy waves, never by crossing a finish marker.
   platforms.push({ x: 0, y: groundY, width: 720, height: 70, type: 'ground' });
-  platforms.push({ x: Math.max(0, length - 500), y: groundY, width: 650, height: 70, type: 'ground' });
+  platforms.push({ x: Math.max(0, length - 500), y: groundY, width: 10000, height: 70, type: 'ground' });
 
   return { platforms, obstacles, collectibles };
 }

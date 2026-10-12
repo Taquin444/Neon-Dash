@@ -182,7 +182,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 />
               </div>
               <p className="text-[10px] text-slate-400 font-mono mt-1.5">
-                {levelInfo.progressPercent}% to Level {levelInfo.level + 1} • Earn XP by racing, collecting coins, and destroying drones!
+                {levelInfo.progressPercent}% to Level {levelInfo.level + 1} • Earn XP by clearing enemy waves, collecting coins, and defeating bosses!
               </p>
             </div>
 

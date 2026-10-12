@@ -11,9 +11,10 @@ import {
   WeaponId,
   CapeId,
   GadgetId,
+  CombatEnemy,
 } from '../types/game';
 import { SpriteRenderer } from './spriteRenderer';
-import { CHARACTERS, STAGES, POWER_UPS, generateLevelElements, WEAPONS, GADGETS } from './levelData';
+import { CHARACTERS, STAGES, POWER_UPS, WAVES_PER_STAGE, generateLevelElements, WEAPONS, GADGETS } from './levelData';
 import { soundManager } from '../audio/soundManager';
 
 export interface GameEngineCallbacks {
@@ -21,6 +22,7 @@ export interface GameEngineCallbacks {
   onCoinsUpdate: (coins: number) => void;
   onHealthUpdate: (health: number) => void;
   onProgressUpdate: (progress: number) => void;
+  onWaveUpdate: (wave: number, enemiesRemaining: number, progress: number) => void;
   onPowerUpActive: (powerUps: { type: PowerUpType; timeLeft: number }[]) => void;
   onGameOver: (finalScore: number, coinsEarned: number, xpEarned: number) => void;
   onStageClear: (finalScore: number, coinsEarned: number, xpEarned: number) => void;
@@ -40,6 +42,7 @@ export class GameEngine {
 
   // Game Loop
   private animationFrameId: number | null = null;
+  private stageClearTimeout: number | null = null;
   private lastTime: number = 0;
   private isRunning: boolean = false;
   private isPaused: boolean = false;
@@ -54,9 +57,18 @@ export class GameEngine {
   private collectibles: Collectible[] = [];
   private projectiles: Projectile[] = [];
   private particles: Particle[] = [];
+  private enemies: CombatEnemy[] = [];
 
-  // Boss System (Mini-Bosses on Stages 1-9, Extreme Boss on Stage 10)
+  // Campaign combat: five escalating waves per stage, with bosses only on 5 and 10.
+  public currentWave: number = 1;
+  private waveTransitionTimer: number = 0;
+  private waveTransitionActive: boolean = false;
+  private totalStageEnemies: number = 0;
+  private defeatedStageEnemies: number = 0;
+
+  // Boss System (Stage 5 mini-boss and Stage 10 extreme boss)
   private hasBoss: boolean = false;
+  private bossActive: boolean = false;
   private bossHealth: number = 1500;
   private bossMaxHealth: number = 1500;
   private bossName: string = 'Cyber Sentinel';
@@ -72,11 +84,9 @@ export class GameEngine {
   public equippedGadget: GadgetId = 'combat_drone';
   public isDead: boolean = false;
   public medCrossUsed: boolean = false;
-  public droneFireCooldown: number = 0;
   public droneIsFiring: boolean = false;
-  public droneFireTimer: number = 0;
   public jetpackThrusting: boolean = false;
-  public x: number = 100;
+  public x: number = 180;
   public y: number = 380;
   public vx: number = 0;
   public vy: number = 0;
@@ -166,6 +176,7 @@ export class GameEngine {
     window.addEventListener('resize', this.handleResize);
     window.addEventListener('keydown', this.handleKeyDown);
     window.addEventListener('keyup', this.handleKeyUp);
+    window.addEventListener('blur', this.handleWindowBlur);
   }
 
   public destroy() {
@@ -173,6 +184,7 @@ export class GameEngine {
     window.removeEventListener('resize', this.handleResize);
     window.removeEventListener('keydown', this.handleKeyDown);
     window.removeEventListener('keyup', this.handleKeyUp);
+    window.removeEventListener('blur', this.handleWindowBlur);
   }
 
   public handleResize = () => {
@@ -211,7 +223,6 @@ export class GameEngine {
     this.equippedCape = cape;
     this.equippedGadget = gadget;
     this.medCrossUsed = false;
-    this.droneFireCooldown = 0.6;
     this.droneIsFiring = false;
     this.jetpackThrusting = false;
     this.isMultiplayer = isMultiplayer;
@@ -222,10 +233,20 @@ export class GameEngine {
     this.gravity = stageConfig.gravity;
     this.baseScrollSpeed = stageConfig.baseSpeed;
     this.hasBoss = Boolean(stageConfig.bossPresent);
+    this.bossActive = false;
     this.bossMaxHealth = stageConfig.bossHealth || 1000;
     this.bossHealth = this.bossMaxHealth;
+    this.bossY = 190;
     this.bossName = stageConfig.bossName || `Sector 0${safeStageNum} Boss`;
     this.isExtremeBoss = Boolean(stageConfig.isExtremeBoss);
+    this.bossAttackTimer = 0;
+    this.currentWave = 1;
+    this.waveTransitionTimer = 0;
+    this.waveTransitionActive = false;
+    this.defeatedStageEnemies = 0;
+    this.totalStageEnemies = Array.from({ length: WAVES_PER_STAGE }, (_, index) =>
+      this.getEnemyCountForWave(index + 1)
+    ).reduce((total, count) => total + count, this.hasBoss ? 1 : 0);
 
     // Generate Level elements
     const elements = generateLevelElements(safeStageNum);
@@ -234,13 +255,24 @@ export class GameEngine {
     this.collectibles = elements.collectibles;
     this.projectiles = [];
     this.particles = [];
+    this.enemies = [];
     this.remotePlayers.clear();
     this.isPaused = false;
     this.isFinished = false;
     this.isDead = false;
+    this.keys = {};
+    this.touchInput = {
+      left: false,
+      right: false,
+      jump: false,
+      slide: false,
+      dash: false,
+      attack: false,
+      powerup: false,
+    };
 
     // Reset Player
-    this.x = 80;
+    this.x = 180;
     this.y = 360;
     this.vx = 0;
     this.vy = 0;
@@ -253,12 +285,21 @@ export class GameEngine {
     this.isGrounded = false;
     this.doubleJumpAvailable = true;
     this.isSliding = false;
+    this.slideTimer = 0;
     this.isDashing = false;
+    this.dashTimer = 0;
+    this.dashCooldown = 0;
     this.isShooting = false;
+    this.shootTimer = 0;
+    this.shootCooldown = 0;
     this.isHurt = false;
+    this.hurtTimer = 0;
     this.isInvincible = false;
+    this.invincibleTimer = 0;
     this.activePowerUps.clear();
     this.animTimer = 0;
+
+    this.startWave(1);
 
     this.callbacks.onScoreUpdate(this.score);
     this.callbacks.onCoinsUpdate(this.coinsCollected);
@@ -267,7 +308,167 @@ export class GameEngine {
     this.callbacks.onPowerUpActive([]);
   }
 
+  private getEnemyCountForWave(wave: number): number {
+    // Every wave adds another attacker; later sectors also start with more enemies.
+    return 1 + wave + Math.floor((this.currentStage - 1) / 4);
+  }
+
+  private startWave(wave: number) {
+    this.currentWave = wave;
+    this.waveTransitionActive = false;
+    this.waveTransitionTimer = 0;
+    // Bosses enter after wave five is cleared, so the showdown has its own beat.
+    this.bossActive = false;
+    this.bossAttackTimer = 0;
+
+    const enemyCount = this.getEnemyCountForWave(wave);
+    const attackInterval = Math.max(1.6, 3.2 - this.currentStage * 0.1 - wave * 0.08);
+    const hoverHeights = [145, 220, 295];
+    this.enemies = Array.from({ length: enemyCount }, (_, index) => {
+      const maxHealth = 52 + this.currentStage * 8 + wave * 8;
+      const archetype = (['scout', 'striker', 'brute'] as const)[
+        (index + wave + this.currentStage) % 3
+      ];
+      const baseY = hoverHeights[(index + wave) % hoverHeights.length];
+      return {
+        id: `stage_${this.currentStage}_wave_${wave}_enemy_${index}`,
+        archetype,
+        x: this.x + 245 + (index % 4) * 42 + Math.floor(index / 4) * 18,
+        y: baseY,
+        baseY,
+        width: archetype === 'brute' ? 48 : 40,
+        height: archetype === 'brute' ? 38 : 32,
+        health: maxHealth,
+        maxHealth,
+        attackCooldown: 0.55 + Math.random() * attackInterval,
+        attackInterval,
+        moveSpeed: 22 + this.currentStage * 1.5 + wave * 3,
+        phase: Math.random() * Math.PI * 2,
+        active: true,
+      };
+    });
+
+    this.updateWaveTelemetry();
+    this.spawnFloatingText(`WAVE ${wave} / ${WAVES_PER_STAGE}`, this.x + 280, 110, '#00f5d4');
+  }
+
+  private getEnemiesRemaining(): number {
+    const npcs = this.enemies.reduce((count, enemy) => count + (enemy.active ? 1 : 0), 0);
+    return npcs + (this.bossActive && this.bossHealth > 0 ? 1 : 0);
+  }
+
+  private updateWaveTelemetry() {
+    this.progress = this.totalStageEnemies > 0
+      ? Math.min(100, Math.floor((this.defeatedStageEnemies / this.totalStageEnemies) * 100))
+      : 0;
+    const remaining = this.getEnemiesRemaining();
+    this.callbacks.onProgressUpdate(this.progress);
+    this.callbacks.onWaveUpdate(this.currentWave, remaining, this.progress);
+  }
+
+  private defeatEnemy(enemy: CombatEnemy) {
+    if (!enemy.active) return;
+    enemy.active = false;
+    this.defeatedStageEnemies++;
+    this.score += 300 + this.currentStage * 65 + this.currentWave * 45;
+    this.coinsCollected += 1 + Math.floor((this.currentStage - 1) / 4);
+    this.xpEarned += 35 + this.currentStage * 8;
+    soundManager.playObstacleExplosion();
+    this.triggerScreenShake(7, 0.2, '#00f5d4');
+    this.spawnObstacleExplosion(enemy.x, enemy.y, true, '#00f5d4');
+    this.spawnFloatingText('HOSTILE DOWN', enemy.x, enemy.y - 28, '#00f5d4');
+    this.callbacks.onScoreUpdate(this.score);
+    this.callbacks.onCoinsUpdate(this.coinsCollected);
+    this.updateWaveTelemetry();
+  }
+
+  private advanceWave(dt: number) {
+    if (this.isFinished || this.isDead) return;
+
+    if (this.waveTransitionActive) {
+      this.waveTransitionTimer -= dt;
+      if (this.waveTransitionTimer <= 0) {
+        if (this.currentWave >= WAVES_PER_STAGE) {
+          if (this.hasBoss && !this.bossActive && this.bossHealth > 0) {
+            this.bossActive = true;
+            this.bossAttackTimer = 0;
+            this.waveTransitionActive = false;
+            this.waveTransitionTimer = 0;
+            this.triggerScreenShake(12, 0.35, '#f72585');
+            this.spawnFloatingText(
+              this.isExtremeBoss ? 'OMEGA COLOSSUS INCOMING!' : `${this.bossName.toUpperCase()} INCOMING!`,
+              this.getBossWorldX(),
+              this.bossY - 70,
+              '#f72585'
+            );
+            this.updateWaveTelemetry();
+          } else {
+            this.completeStage();
+          }
+        } else {
+          this.startWave(this.currentWave + 1);
+        }
+      }
+      return;
+    }
+
+    if (this.getEnemiesRemaining() === 0) {
+      // Clear both teams' lingering shots before either the next wave or boss phase.
+      this.projectiles = [];
+
+      if (this.currentWave >= WAVES_PER_STAGE && (!this.hasBoss || this.bossActive)) {
+        this.spawnFloatingText(
+          this.hasBoss ? 'FINAL BOSS DEFEATED' : 'SECTOR CLEARED',
+          this.x + 180,
+          150,
+          '#fee440'
+        );
+        this.completeStage();
+        return;
+      }
+
+      this.waveTransitionActive = true;
+      this.waveTransitionTimer = 0.9;
+      this.spawnFloatingText(
+        this.currentWave === WAVES_PER_STAGE
+          ? 'FIVE WAVES CLEARED'
+          : `WAVE ${this.currentWave} CLEARED`,
+        this.x + 180,
+        150,
+        '#fee440'
+      );
+      this.updateWaveTelemetry();
+    }
+  }
+
+  private completeStage() {
+    if (this.isFinished || this.isDead) return;
+    this.isFinished = true;
+    this.vx = 0;
+    this.score += this.isExtremeBoss ? 35000 : this.hasBoss ? 12000 : 5000;
+    this.xpEarned += this.isExtremeBoss ? 1600 : this.hasBoss ? 600 : 350;
+    soundManager.playVictory();
+    this.triggerScreenShake(this.isExtremeBoss ? 24 : 16, 0.7, '#fee440');
+    this.callbacks.onScoreUpdate(this.score);
+    this.updateWaveTelemetry();
+
+    this.stageClearTimeout = window.setTimeout(() => {
+      this.stageClearTimeout = null;
+      if (!this.isRunning || this.isDead) return;
+      this.stop();
+      this.callbacks.onStageClear(this.score, this.coinsCollected, this.xpEarned);
+    }, 850);
+  }
+
+  private getBossWorldX(): number {
+    return this.cameraX + this.bossX;
+  }
+
   public start() {
+    if (this.stageClearTimeout !== null) {
+      window.clearTimeout(this.stageClearTimeout);
+      this.stageClearTimeout = null;
+    }
     if (this.animationFrameId !== null) {
       cancelAnimationFrame(this.animationFrameId);
       this.animationFrameId = null;
@@ -282,16 +483,28 @@ export class GameEngine {
 
   public stop() {
     this.isRunning = false;
+    const stageClearPending = this.stageClearTimeout !== null;
+    if (this.stageClearTimeout !== null) {
+      window.clearTimeout(this.stageClearTimeout);
+      this.stageClearTimeout = null;
+    }
     if (this.animationFrameId !== null) {
       cancelAnimationFrame(this.animationFrameId);
       this.animationFrameId = null;
     }
     soundManager.stopMusic();
+
+    // A player who exits during the short victory presentation has still earned
+    // the clear; cancelling its timer must not discard campaign rewards.
+    if (stageClearPending && this.isFinished && !this.isDead) {
+      this.callbacks.onStageClear(this.score, this.coinsCollected, this.xpEarned);
+    }
   }
 
   public setPaused(paused: boolean) {
     this.isPaused = paused;
     if (paused) {
+      this.handleWindowBlur();
       soundManager.stopMusic();
     } else {
       soundManager.startMusic();
@@ -301,27 +514,40 @@ export class GameEngine {
 
   // Input Handlers
   private handleKeyDown = (e: KeyboardEvent) => {
+    const wasPressed = this.keys[e.code];
     this.keys[e.code] = true;
+    if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
 
-    if (e.code === 'KeyW' || e.code === 'ArrowUp' || e.code === 'Space') {
+    if (!wasPressed && (e.code === 'KeyW' || e.code === 'ArrowUp' || e.code === 'Space')) {
       this.triggerJump();
     }
-    if (e.code === 'KeyS' || e.code === 'ArrowDown') {
+    if (!wasPressed && (e.code === 'KeyS' || e.code === 'ArrowDown')) {
       this.triggerSlide();
     }
-    if (e.code === 'ShiftLeft' || e.code === 'ShiftRight' || e.code === 'KeyJ') {
+    if (!wasPressed && (e.code === 'ShiftLeft' || e.code === 'ShiftRight' || e.code === 'KeyJ')) {
       this.triggerDash();
     }
-    if (e.code === 'KeyK' || e.code === 'KeyF') {
+    if (!wasPressed && (e.code === 'KeyK' || e.code === 'KeyF')) {
       this.triggerShoot();
     }
-    if (e.code === 'KeyE' || e.code === 'KeyQ') {
+    if (!wasPressed && (e.code === 'KeyE' || e.code === 'KeyQ')) {
       this.triggerInventoryPowerup();
     }
   };
 
   private handleKeyUp = (e: KeyboardEvent) => {
     this.keys[e.code] = false;
+  };
+
+  private handleWindowBlur = () => {
+    this.keys = {};
+    this.touchInput.left = false;
+    this.touchInput.right = false;
+    this.touchInput.jump = false;
+    this.touchInput.slide = false;
+    this.touchInput.dash = false;
+    this.touchInput.attack = false;
+    this.touchInput.powerup = false;
   };
 
   public triggerJump() {
@@ -365,67 +591,81 @@ export class GameEngine {
   }
 
   public triggerShoot() {
-    if (this.shootCooldown <= 0) {
-      this.isShooting = true;
-      const wpn = WEAPONS.find((w) => w.id === this.equippedWeapon) || WEAPONS[0];
-      this.shootTimer = 0.2;
-      this.shootCooldown = wpn.fireRate;
-      soundManager.playLaser();
+    if (this.shootCooldown > 0 || this.waveTransitionActive || this.isFinished || this.isDead) return;
 
-      const dir = this.facing === 'left' ? -1 : 1;
-      const startX = this.x + dir * 25;
-      const startY = this.y - 35;
+    this.isShooting = true;
+    const weapon = WEAPONS.find((w) => w.id === this.equippedWeapon) || WEAPONS[0];
+    this.shootTimer = 0.2;
+    this.shootCooldown = weapon.fireRate;
+    soundManager.playLaser();
 
-      const isTriple = this.activePowerUps.has('triple_blaster');
-      if (isTriple) {
-        this.projectiles.push(
-          { id: Math.random().toString(), x: startX, y: startY - 10, vx: dir * 750, vy: -50, radius: 5, color: '#f72585', fromPlayer: true, lifetime: 1.5 },
-          { id: Math.random().toString(), x: startX, y: startY, vx: dir * 750, vy: 0, radius: 5, color: wpn.color, fromPlayer: true, lifetime: 1.5 },
-          { id: Math.random().toString(), x: startX, y: startY + 10, vx: dir * 750, vy: 50, radius: 5, color: '#fee440', fromPlayer: true, lifetime: 1.5 }
-        );
-      } else if (this.equippedWeapon === 'dual_blasters') {
-        this.projectiles.push(
-          { id: Math.random().toString(), x: startX, y: startY - 6, vx: dir * 820, vy: 0, radius: 5, color: wpn.color, fromPlayer: true, lifetime: 1.5 },
-          { id: Math.random().toString(), x: startX, y: startY + 6, vx: dir * 820, vy: 0, radius: 5, color: wpn.color, fromPlayer: true, lifetime: 1.5 }
-        );
-      } else if (this.equippedWeapon === 'railgun') {
-        this.projectiles.push({
-          id: Math.random().toString(),
-          x: startX,
-          y: startY,
-          vx: dir * 1150,
-          vy: 0,
-          radius: 7,
-          color: wpn.color,
-          fromPlayer: true,
-          lifetime: 1.2,
-        });
-      } else if (this.equippedWeapon === 'void_scythe') {
-        this.projectiles.push({
-          id: Math.random().toString(),
-          x: startX,
-          y: startY,
-          vx: dir * 700,
-          vy: 0,
-          radius: 12,
-          color: wpn.color,
-          fromPlayer: true,
-          lifetime: 1.5,
-        });
-      } else {
-        this.projectiles.push({
-          id: Math.random().toString(),
-          x: startX,
-          y: startY,
-          vx: dir * 720,
-          vy: 0,
-          radius: 6,
-          color: wpn.color,
-          fromPlayer: true,
-          lifetime: 1.5,
-        });
+    const direction = this.facing === 'left' ? -1 : 1;
+    const startX = this.x + direction * 25;
+    const startY = this.y - 35;
+    const makeShot = (
+      offsetY: number,
+      spreadY: number,
+      speed: number,
+      radius: number,
+      color: string
+    ): Projectile => {
+      const shotY = startY + offsetY;
+      const target = this.findAimTarget(direction, startX);
+      let shotVy = spreadY;
+      if (target) {
+        const distanceX = Math.abs(target.x - startX);
+        const flightTime = Math.max(0.12, distanceX / speed);
+        shotVy += Math.max(-speed * 0.7, Math.min(speed * 0.7, (target.y - shotY) / flightTime));
       }
+      return {
+        id: Math.random().toString(),
+        x: startX,
+        y: shotY,
+        // Inherit the pilot's movement so shots maintain their full relative range while running.
+        vx: this.vx + direction * speed,
+        vy: shotVy,
+        radius,
+        color,
+        fromPlayer: true,
+        // Long enough to cross the arena and hit the boss from the starting line.
+        lifetime: 4,
+      };
+    };
+
+    if (this.activePowerUps.has('triple_blaster')) {
+      this.projectiles.push(
+        makeShot(-10, -50, 750, 5, '#f72585'),
+        makeShot(0, 0, 750, 5, weapon.color),
+        makeShot(10, 50, 750, 5, '#fee440')
+      );
+    } else if (this.equippedWeapon === 'dual_blasters') {
+      this.projectiles.push(
+        makeShot(-6, 0, 820, 5, weapon.color),
+        makeShot(6, 0, 820, 5, weapon.color)
+      );
+    } else if (this.equippedWeapon === 'railgun') {
+      this.projectiles.push(makeShot(0, 0, 1450, 7, weapon.color));
+    } else if (this.equippedWeapon === 'void_scythe') {
+      this.projectiles.push(makeShot(0, 0, 700, 12, weapon.color));
+    } else {
+      this.projectiles.push(makeShot(0, 0, 720, 6, weapon.color));
     }
+  }
+
+  private findAimTarget(direction: number, startX: number): { x: number; y: number } | null {
+    const targets: { x: number; y: number }[] = this.enemies
+      .filter((enemy) => enemy.active)
+      .map((enemy) => ({ x: enemy.x, y: enemy.y }));
+    if (this.bossActive && this.bossHealth > 0) {
+      targets.push({ x: this.getBossWorldX(), y: this.bossY });
+    }
+
+    return targets
+      .filter((target) => {
+        const distance = (target.x - startX) * direction;
+        return distance > 0 && distance <= 3200;
+      })
+      .sort((a, b) => Math.abs(a.x - startX) - Math.abs(b.x - startX))[0] || null;
   }
 
   public activatePowerUp(type: PowerUpType) {
@@ -519,6 +759,12 @@ export class GameEngine {
       this.impactFlashAlpha = Math.max(0, this.impactFlashAlpha - dt * 3.8);
     }
 
+    // Keep victory presentation moving, but stop post-clear movement and scoring.
+    if (this.isFinished || this.isDead) {
+      this.vx = 0;
+      return;
+    }
+
     // Time warp slow-down modifier
     const timeScale = this.activePowerUps.has('chrono_warp') ? 0.55 : 1.0;
     const effectiveDt = dt * timeScale;
@@ -595,15 +841,21 @@ export class GameEngine {
     const rightPressed = this.keys['KeyD'] || this.keys['ArrowRight'] || this.touchInput.right;
     const jumpHeld = this.keys['Space'] || this.keys['KeyW'] || this.keys['ArrowUp'] || this.touchInput.jump;
 
-    if (leftPressed) {
-      this.vx = -speed * 0.45;
+    // Movement is entirely pilot-controlled; releasing both directions stops the runner.
+    if (leftPressed && !rightPressed) {
+      this.vx = -speed;
       this.facing = 'left';
-    } else if (rightPressed) {
-      this.vx = speed * 1.25;
-      this.facing = 'right';
-    } else {
+    } else if (rightPressed && !leftPressed) {
       this.vx = speed;
       this.facing = 'right';
+    } else {
+      this.vx = 0;
+    }
+
+    // Hold K / F (or the touch fire button) to keep firing manually.
+    const fireHeld = this.keys['KeyK'] || this.keys['KeyF'] || this.touchInput.attack;
+    if (fireHeld && !this.waveTransitionActive && this.shootCooldown <= 0) {
+      this.triggerShoot();
     }
 
     // Jetpack Upward Boost
@@ -615,48 +867,11 @@ export class GameEngine {
       this.jetpackThrusting = false;
     }
 
-    // Tactical Combat Drone Autonomous Defense Laser
-    if (this.equippedGadget === 'combat_drone') {
-      this.droneFireCooldown -= dt;
-      if (this.droneFireCooldown <= 0) {
-        const targetObs = this.obstacles.find(
-          (o) => o.active && o.x > this.x && o.x < this.x + 440
-        );
-        let targetX: number | null = targetObs ? targetObs.x : null;
-        let targetY: number | null = targetObs ? targetObs.y + targetObs.height / 2 : null;
-
-        if (!targetObs && this.hasBoss && this.bossHealth > 0) {
-          targetX = this.cameraX + this.bossX;
-          targetY = this.bossY;
-        }
-
-        if (targetX !== null && targetY !== null) {
-          this.droneFireCooldown = 1.3;
-          this.droneIsFiring = true;
-          this.droneFireTimer = 0.22;
-          soundManager.playLaser();
-          this.projectiles.push({
-            id: Math.random().toString(),
-            x: this.x + (this.facing === 'right' ? -35 : 35),
-            y: this.y - 48,
-            vx: (this.facing === 'right' ? 1 : -1) * 820,
-            vy: (targetY - (this.y - 48)) * 0.7,
-            radius: 4,
-            color: '#00f5d4',
-            fromPlayer: true,
-            lifetime: 1.2,
-          });
-        }
-      }
-    }
-    if (this.droneIsFiring) {
-      this.droneFireTimer -= dt;
-      if (this.droneFireTimer <= 0) this.droneIsFiring = false;
-    }
+    this.droneIsFiring = false;
 
     // 4. Gravity & Vertical Physics
     this.vy += this.gravity * effectiveDt;
-    this.x += this.vx * effectiveDt;
+    this.x = Math.max(this.width / 2 + 12, this.x + this.vx * effectiveDt);
     this.y += this.vy * effectiveDt;
 
     // 5. Collision with Platforms
@@ -717,11 +932,9 @@ export class GameEngine {
     this.cameraX = this.x - 180;
     if (this.cameraX < 0) this.cameraX = 0;
 
-    // 7. Progress & Score Calculation
-    this.progress = Math.min(100, Math.floor((this.x / this.trackLength) * 100));
-    this.callbacks.onProgressUpdate(this.progress);
+    // 7. Campaign progress is earned by clearing enemy waves, not by distance.
 
-    // Score accumulates over distance
+    // Score accumulates while the pilot deliberately advances.
     const scoreDelta = Math.floor(this.vx * effectiveDt * 0.1);
     if (scoreDelta > 0) {
       this.score += scoreDelta * (this.activePowerUps.has('quantum_nova') ? 2 : 1);
@@ -793,11 +1006,10 @@ export class GameEngine {
           let damage = 15;
           if (obs.type === 'spike') {
             damage = 15;
-            this.vy = -340; // Knock player up and forward so they clear the spike cleanly
-            this.vx = Math.max(this.vx, this.baseScrollSpeed);
+            this.vy = -340; // Knock the pilot upward so the spike can be cleared.
           } else if (obs.type === 'laser_fence') {
             damage = 18;
-            this.vx = Math.max(120, this.vx * 0.7);
+            this.vx *= 0.7;
           } else if (obs.type === 'fire_jet') {
             damage = 18;
           } else if (obs.type === 'drone') {
@@ -808,7 +1020,58 @@ export class GameEngine {
       }
     }
 
-    // 9. Collectibles (Coins, Gems, PowerUps) & Magnet Logic
+    // 9. Hostile NPCs pursue the pilot, fire aimed shots, and must all be eliminated.
+    for (const enemy of this.enemies) {
+      if (!enemy.active) continue;
+
+      const directionToPlayer = this.x >= enemy.x ? 1 : -1;
+      if (Math.abs(this.x - enemy.x) > 150) {
+        enemy.x += directionToPlayer * enemy.moveSpeed * effectiveDt;
+      }
+      enemy.y = enemy.baseY + Math.sin(this.animTimer * 2.2 + enemy.phase) * 18;
+      enemy.attackCooldown -= dt;
+
+      const enemyLeft = enemy.x - enemy.width / 2;
+      const enemyRight = enemy.x + enemy.width / 2;
+      const enemyTop = enemy.y - enemy.height / 2;
+      const enemyBottom = enemy.y + enemy.height / 2;
+      if (
+        playerRight > enemyLeft &&
+        playerLeft < enemyRight &&
+        playerFeet > enemyTop &&
+        playerHead < enemyBottom &&
+        !this.isInvincible &&
+        !this.isDead &&
+        !this.isFinished
+      ) {
+        this.handlePlayerHurt(16 + Math.floor(this.currentStage * 0.6));
+        enemy.x -= directionToPlayer * 48;
+      }
+
+      if (enemy.attackCooldown <= 0 && !this.isDead && !this.isFinished) {
+        enemy.attackCooldown = enemy.attackInterval * (0.85 + Math.random() * 0.3);
+        const shotSpeed = 300 + this.currentStage * 14 + this.currentWave * 10;
+        const shotDirection = this.x >= enemy.x ? 1 : -1;
+        const targetDistance = Math.max(80, Math.abs(this.x - enemy.x));
+        const flightTime = targetDistance / shotSpeed;
+        const aimVy = ((this.y - 28) - enemy.y) / flightTime;
+        const damage = 8 + Math.floor(this.currentStage * 0.6) + Math.floor(this.currentWave * 0.5);
+        this.projectiles.push({
+          id: Math.random().toString(),
+          x: enemy.x,
+          y: enemy.y,
+          vx: shotDirection * shotSpeed,
+          vy: Math.max(-250, Math.min(250, aimVy)),
+          radius: this.currentStage >= 7 ? 7 : 6,
+          color: enemy.archetype === 'brute' ? '#fb7185' : '#ff0054',
+          fromPlayer: false,
+          lifetime: 3,
+          damage,
+        });
+      }
+    }
+
+    // 10. Collectibles (Coins, Gems, PowerUps) & Magnet Logic
     const magnetActive = this.activePowerUps.has('coin_magnet') || this.equippedGadget === 'graviton_magnet';
     const magnetRadius = (this.equippedGadget === 'graviton_magnet' || charDef.id === 'ronin') ? 420 : 240;
 
@@ -854,85 +1117,88 @@ export class GameEngine {
       }
     }
 
-    // 10. Projectiles Update & Collision
+    // 11. Manually-fired shots damage wave NPCs, hazards, and the active boss.
+    const weapon = WEAPONS.find((item) => item.id === this.equippedWeapon) || WEAPONS[0];
     for (let i = this.projectiles.length - 1; i >= 0; i--) {
       const proj = this.projectiles[i];
       proj.x += proj.vx * dt;
       proj.y += proj.vy * dt;
       proj.lifetime -= dt;
 
-      // Check hit against drones / obstacles
-      if (proj.fromPlayer) {
-        for (const obs of this.obstacles) {
-          if (!obs.active) continue;
-          if (
-            proj.x > obs.x &&
-            proj.x < obs.x + obs.width &&
-            proj.y > obs.y &&
-            proj.y < obs.y + obs.height
-          ) {
-            obs.active = false;
-            proj.lifetime = 0;
-            this.score += 150;
-            soundManager.playObstacleExplosion();
-            this.triggerScreenShake(6, 0.2, '#00f5d4');
-            this.spawnObstacleExplosion(
-              obs.x + obs.width / 2,
-              obs.y + obs.height / 2,
-              true,
-              '#00f5d4',
-              obs.type
-            );
-            break;
+      if (proj.fromPlayer && proj.lifetime > 0) {
+        const targetEnemy = this.enemies.find((enemy) =>
+          enemy.active &&
+          Math.abs(proj.x - enemy.x) < enemy.width / 2 + proj.radius &&
+          Math.abs(proj.y - enemy.y) < enemy.height / 2 + proj.radius
+        );
+
+        if (targetEnemy) {
+          targetEnemy.health -= weapon.damage;
+          proj.lifetime = 0;
+          this.triggerScreenShake(4, 0.12, '#00f5d4');
+          this.spawnObstacleExplosion(proj.x, proj.y, true, '#00f5d4');
+          if (targetEnemy.health <= 0) this.defeatEnemy(targetEnemy);
+        } else {
+          for (const obs of this.obstacles) {
+            if (
+              obs.active &&
+              proj.x > obs.x &&
+              proj.x < obs.x + obs.width &&
+              proj.y > obs.y &&
+              proj.y < obs.y + obs.height
+            ) {
+              obs.active = false;
+              proj.lifetime = 0;
+              this.score += 150;
+              soundManager.playObstacleExplosion();
+              this.triggerScreenShake(6, 0.2, '#00f5d4');
+              this.spawnObstacleExplosion(
+                obs.x + obs.width / 2,
+                obs.y + obs.height / 2,
+                true,
+                '#00f5d4',
+                obs.type
+              );
+              break;
+            }
           }
         }
 
-        // Check hit against Boss
-        if (this.hasBoss && this.bossHealth > 0) {
-          const bossActualX = this.cameraX + this.bossX;
-          const hitRadius = this.isExtremeBoss ? 75 : 55;
-          const bossDistX = Math.abs(proj.x - bossActualX);
-          const bossDistY = Math.abs(proj.y - this.bossY);
-          if (bossDistX < hitRadius && bossDistY < hitRadius) {
-            const wDef = WEAPONS.find((w) => w.id === this.equippedWeapon);
-            const dmg = wDef ? wDef.damage : 40;
-            this.bossHealth -= dmg;
+        if (proj.lifetime > 0 && this.bossActive && this.bossHealth > 0) {
+          const bossActualX = this.getBossWorldX();
+          const hitRadius = this.isExtremeBoss ? 100 : 76;
+          if (
+            Math.abs(proj.x - bossActualX) < hitRadius &&
+            Math.abs(proj.y - this.bossY) < hitRadius
+          ) {
+            this.bossHealth = Math.max(0, this.bossHealth - weapon.damage);
             proj.lifetime = 0;
             soundManager.playObstacleExplosion();
             this.triggerScreenShake(this.isExtremeBoss ? 8 : 5, 0.18, '#f72585');
             this.spawnObstacleExplosion(proj.x, proj.y, true, this.isExtremeBoss ? '#fee440' : '#f72585');
-            if (this.bossHealth <= 0 && !this.isFinished) {
-              this.bossHealth = 0;
-              const bonusScore = this.isExtremeBoss ? 35000 : 12000;
-              const bonusCoins = this.isExtremeBoss ? 400 : 150;
-              const bonusXp = this.isExtremeBoss ? 1600 : 600;
-              this.score += bonusScore;
-              this.coinsCollected += bonusCoins;
-              this.xpEarned += bonusXp;
+            if (this.bossHealth === 0) {
+              this.defeatedStageEnemies++;
+              this.score += this.isExtremeBoss ? 35000 : 12000;
+              this.coinsCollected += this.isExtremeBoss ? 400 : 150;
+              this.xpEarned += this.isExtremeBoss ? 1600 : 600;
               soundManager.playVictory();
               this.triggerScreenShake(this.isExtremeBoss ? 30 : 20, 0.9, '#fee440');
               this.spawnObstacleExplosion(bossActualX, this.bossY, true, '#fee440');
               this.spawnExplosion(bossActualX, this.bossY, '#ec4899');
               this.spawnFloatingText(
-                this.isExtremeBoss ? 'OMEGA COLOSSUS DESTROYED!' : `${this.bossName.toUpperCase()} DESTROYED!`,
+                this.isExtremeBoss ? 'OMEGA COLOSSUS DEFEATED!' : `${this.bossName.toUpperCase()} DEFEATED!`,
                 bossActualX,
                 this.bossY - 45,
                 '#fee440'
               );
               this.callbacks.onScoreUpdate(this.score);
               this.callbacks.onCoinsUpdate(this.coinsCollected);
-
-              // Boss defeat clears stage! Guaranteed clean transition
-              this.isFinished = true;
-              setTimeout(() => {
-                this.stop();
-                this.callbacks.onStageClear(this.score, this.coinsCollected, this.xpEarned);
-              }, 950);
+              this.updateWaveTelemetry();
             }
           }
         }
-      } else {
-        // Enemy / Boss projectile hitting the player!
+      } else if (!proj.fromPlayer && proj.lifetime > 0) {
+        // NPC and boss shots are dangerous; jump, move, or dash to evade them.
         const dx = Math.abs(proj.x - this.x);
         const dy = Math.abs(proj.y - (this.y - 28));
         if (dx < 26 && dy < 32 && !this.isInvincible && !this.isDead && !this.isFinished) {
@@ -940,63 +1206,70 @@ export class GameEngine {
           this.triggerScreenShake(10, 0.28, '#ff0054');
           soundManager.playObstacleExplosion();
           this.spawnObstacleExplosion(proj.x, proj.y, false, '#ff0054');
-          const bossProjDamage = this.isExtremeBoss ? 18 : 14;
-          this.handlePlayerHurt(bossProjDamage);
+          this.handlePlayerHurt(proj.damage ?? (this.isExtremeBoss ? 18 : 14));
         }
       }
 
-      if (proj.lifetime <= 0) {
-        this.projectiles.splice(i, 1);
-      }
+      if (proj.lifetime <= 0) this.projectiles.splice(i, 1);
     }
 
-    // 11. Boss Logic (Mini-Bosses & Stage 10 Extreme Boss)
-    if (this.hasBoss && this.bossHealth > 0) {
+    this.enemies = this.enemies.filter((enemy) => enemy.active);
+
+    // 12. Boss Logic (Only after all five waves on Stage 5 and Stage 10)
+    if (this.bossActive && this.bossHealth > 0) {
       this.bossAttackTimer += dt;
       const hoverSpeed = this.isExtremeBoss ? 3.4 : 2.0;
       const hoverAmp = this.isExtremeBoss ? 70 : 45;
       this.bossY = 190 + Math.sin(this.animTimer * hoverSpeed) * hoverAmp;
 
-      const attackInterval = this.isExtremeBoss ? 1.4 : 2.2;
+      // The Stage 10 Colossus has five times the Stage 5 health and a much denser volley.
+      const attackInterval = this.isExtremeBoss ? 1.6 : 2.2;
       if (this.bossAttackTimer > attackInterval) {
         this.bossAttackTimer = 0;
+        const bossActualX = this.getBossWorldX();
+        const direction = this.x >= bossActualX ? 1 : -1;
+        const speed = this.isExtremeBoss ? 500 : 390;
+        const damage = this.isExtremeBoss ? 18 : 14;
+        soundManager.playShoot();
 
         if (this.isExtremeBoss) {
-          // EXTREME BOSS: Fires triple spread plasma volley!
-          soundManager.playShoot();
           [-0.3, 0, 0.3].forEach((angleOffset) => {
+            const y = this.bossY + angleOffset * 40;
+            const flightTime = Math.max(0.12, Math.abs(this.x - bossActualX) / speed);
+            const aimVy = ((this.y - 30) - y) / flightTime;
             this.projectiles.push({
               id: Math.random().toString(),
-              x: this.cameraX + this.bossX - 40,
-              y: this.bossY + angleOffset * 40,
-              vx: -460,
-              vy: Math.sin(angleOffset) * 200 + (this.y - 30 - this.bossY) * 0.5,
+              x: bossActualX - direction * 40,
+              y,
+              vx: direction * speed,
+              vy: Math.max(-220, Math.min(220, aimVy + Math.sin(angleOffset) * 150)),
               radius: 9,
               color: '#f72585',
               fromPlayer: false,
-              lifetime: 2.8,
+              lifetime: 3,
+              damage,
             });
           });
           this.triggerScreenShake(7, 0.2, '#f72585');
         } else {
-          // Mini-Boss: Fires targeted homing plasma orb
-          soundManager.playShoot();
+          const flightTime = Math.max(0.12, Math.abs(this.x - bossActualX) / speed);
           this.projectiles.push({
             id: Math.random().toString(),
-            x: this.cameraX + this.bossX - 30,
+            x: bossActualX - direction * 30,
             y: this.bossY,
-            vx: -390,
-            vy: (this.y - 30 - this.bossY) * 0.7,
+            vx: direction * speed,
+            vy: ((this.y - 30) - this.bossY) / flightTime,
             radius: 8,
             color: '#ff0054',
             fromPlayer: false,
-            lifetime: 2.6,
+            lifetime: 3,
+            damage,
           });
         }
       }
     }
 
-    // 12. Particles Update (Physics, Gravity, Expansion & Spin)
+    // 13. Particles Update (Physics, Gravity, Expansion & Spin)
     for (let i = this.particles.length - 1; i >= 0; i--) {
       const p = this.particles[i];
       p.x += p.vx * dt;
@@ -1016,18 +1289,10 @@ export class GameEngine {
       }
     }
 
-    // 13. Stage Completion (Finish Line)
-    if (this.x >= this.trackLength && !this.isFinished) {
-      this.isFinished = true;
-      this.stop(); // Clean stop so loop does not freeze or desync
-      soundManager.playVictory();
-      this.score += 2000;
-      this.xpEarned += 350;
-      this.callbacks.onScoreUpdate(this.score);
-      this.callbacks.onStageClear(this.score, this.coinsCollected, this.xpEarned);
-    }
+    // 14. A stage can only be cleared by defeating every hostile in all five waves.
+    this.advanceWave(dt);
 
-    // 14. Network State Sync & AI Rival Simulation (Multiplayer)
+    // 15. Network State Sync & AI Rival Simulation (Multiplayer)
     if (this.isMultiplayer) {
       // Simulate smart AI runner if bot rival present
       this.remotePlayers.forEach((rp) => {
@@ -1209,7 +1474,8 @@ export class GameEngine {
     // 4. Draw Collectibles
     this.renderCollectibles();
 
-    // 5. Draw Obstacles & Boss
+    // 5. Draw wave hostiles, environmental hazards, and the active boss.
+    this.renderCombatEnemies();
     this.renderObstacles();
 
     // 6. Draw Remote Multiplayer Opponents
@@ -1262,13 +1528,10 @@ export class GameEngine {
     this.renderProjectiles();
     this.renderParticles();
 
-    // 9. Draw Finish Line Gate
-    this.renderFinishLine();
-
     ctx.restore(); // Restore Camera translation
 
-    // 10. Boss Health Bar (HUD-level)
-    if (this.hasBoss && this.bossHealth > 0) {
+    // Show a boss bar only during the dedicated post-wave boss encounter.
+    if (this.bossActive && this.bossHealth > 0) {
       this.renderBossHealthBar();
     }
 
@@ -1441,6 +1704,52 @@ export class GameEngine {
     }
   }
 
+  private renderCombatEnemies() {
+    const ctx = this.ctx;
+    for (const enemy of this.enemies) {
+      if (!enemy.active) continue;
+
+      const color = enemy.archetype === 'brute'
+        ? '#fb7185'
+        : enemy.archetype === 'striker'
+        ? '#f97316'
+        : '#ff0054';
+      const bob = Math.sin(this.animTimer * 5 + enemy.phase) * 2;
+      const healthRatio = Math.max(0, enemy.health / enemy.maxHealth);
+
+      ctx.save();
+      ctx.translate(enemy.x, enemy.y + bob);
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 14;
+      ctx.fillStyle = '#111827';
+      ctx.beginPath();
+      ctx.roundRect(-enemy.width / 2, -enemy.height / 2, enemy.width, enemy.height, 8);
+      ctx.fill();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = enemy.archetype === 'brute' ? 3 : 2;
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+
+      // Twin thrusters and a bright targeting eye identify these as hostile NPCs.
+      ctx.fillStyle = color;
+      ctx.fillRect(-enemy.width / 2 - 5, -7, 6, 14);
+      ctx.fillRect(enemy.width / 2 - 1, -7, 6, 14);
+      ctx.fillStyle = '#f8fafc';
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 8;
+      ctx.beginPath();
+      ctx.arc(3, -2, enemy.archetype === 'brute' ? 6 : 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.95)';
+      ctx.fillRect(-enemy.width / 2, -enemy.height / 2 - 9, enemy.width, 4);
+      ctx.fillStyle = color;
+      ctx.fillRect(-enemy.width / 2, -enemy.height / 2 - 9, enemy.width * healthRatio, 4);
+      ctx.restore();
+    }
+  }
+
   private renderObstacles() {
     const ctx = this.ctx;
     for (const obs of this.obstacles) {
@@ -1504,9 +1813,9 @@ export class GameEngine {
       }
     }
 
-    // Boss (Mini-Bosses & Stage 10 Extreme Boss)
-    if (this.hasBoss && this.bossHealth > 0) {
-      const bx = this.cameraX + this.bossX;
+    // Only stages 5 and 10 reveal their boss after all five waves are cleared.
+    if (this.bossActive && this.bossHealth > 0) {
+      const bx = this.getBossWorldX();
       const by = this.bossY;
 
       ctx.save();
@@ -1590,7 +1899,7 @@ export class GameEngine {
         ctx.arc(0, 0, 8, 0, Math.PI * 2);
         ctx.fill();
       } else {
-        // --- STAGES 1-9: MINI-BOSS SENTINELS ---
+        // --- STAGE 5: GLITCH OVERLORD MINI-BOSS ---
         // Rotating Energy Ring
         ctx.save();
         ctx.rotate(this.animTimer * 1.8);
@@ -1697,32 +2006,13 @@ export class GameEngine {
     }
   }
 
-  private renderFinishLine() {
-    const ctx = this.ctx;
-    const fx = this.trackLength;
-    const fy = 380;
-
-    // Glowing Holographic Gate
-    ctx.strokeStyle = '#00f5d4';
-    ctx.lineWidth = 6;
-    ctx.shadowColor = '#00f5d4';
-    ctx.shadowBlur = 18;
-    ctx.strokeRect(fx - 10, fy - 140, 20, 140);
-    ctx.shadowBlur = 0;
-
-    // Checkered banner
-    ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 16px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('FINISH', fx, fy - 150);
-  }
-
   private renderBossHealthBar() {
     const ctx = this.ctx;
     const barW = this.isExtremeBoss ? 420 : 340;
     const barH = this.isExtremeBoss ? 16 : 13;
     const bx = (this.virtualWidth - barW) / 2;
-    const by = 22;
+    // Place it beneath the wave objective so the active boss health stays readable.
+    const by = 136;
 
     ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
     ctx.strokeStyle = this.isExtremeBoss ? '#fee440' : '#f43f5e';

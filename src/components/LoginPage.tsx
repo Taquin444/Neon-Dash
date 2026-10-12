@@ -7,11 +7,13 @@ import { LogIn, UserPlus, KeyRound, User, ShieldCheck, AlertCircle, Sparkles, Sw
 interface LoginPageProps {
   onLoginSuccess: (stats: PlayerStats) => void;
   initialStats: PlayerStats;
+  guestStats?: PlayerStats;
 }
 
 export const LoginPage: React.FC<LoginPageProps> = ({
   onLoginSuccess,
   initialStats,
+  guestStats,
 }) => {
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [username, setUsername] = useState('');
@@ -155,17 +157,17 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   const handleGuestLogin = () => {
     soundManager.playJump();
     const guestName = 'Racer_' + Math.floor(1000 + Math.random() * 9000);
-    const guestStats: PlayerStats = {
-      ...initialStats,
+    const guestPlayerStats: PlayerStats = {
+      ...(guestStats || initialStats),
       username: guestName,
       isLoggedIn: true,
     };
     try {
-      localStorage.setItem('neon_dash_player_stats', JSON.stringify(guestStats));
+      localStorage.setItem('neon_dash_player_stats', JSON.stringify(guestPlayerStats));
     } catch {
       // ignore
     }
-    onLoginSuccess(guestStats);
+    onLoginSuccess(guestPlayerStats);
   };
 
   return (
@@ -192,7 +194,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
             NEON DASH
           </h1>
           <p className="text-xs text-slate-400 font-mono tracking-widest mt-1">
-            CYBER MULTIPLAYER RUNNER • PILOT AUTH
+            MANUAL COMBAT CAMPAIGN • PILOT AUTH
           </p>
         </div>
 

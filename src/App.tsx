@@ -105,6 +105,8 @@ export default function App() {
   const [coins, setCoins] = useState(0);
   const [health, setHealth] = useState(100);
   const [progress, setProgress] = useState(0);
+  const [waveNumber, setWaveNumber] = useState(1);
+  const [enemiesRemaining, setEnemiesRemaining] = useState(0);
   const [activePowerUps, setActivePowerUps] = useState<{ type: PowerUpType; timeLeft: number }[]>([]);
   const [isMuted, setIsMuted] = useState(false);
 
@@ -120,7 +122,6 @@ export default function App() {
   const [multiplayerError, setMultiplayerError] = useState<string | null>(null);
   const [matchCountdown, setMatchCountdown] = useState<number | null>(null);
   const [isMultiplayerMatch, setIsMultiplayerMatch] = useState(false);
-  const [remotePlayersList, setRemotePlayersList] = useState<RemotePlayer[]>([]);
 
   // Canvas & Engine Ref
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -189,6 +190,11 @@ export default function App() {
       onCoinsUpdate: (c) => setCoins(c),
       onHealthUpdate: (h) => setHealth(h),
       onProgressUpdate: (p) => setProgress(p),
+      onWaveUpdate: (wave, remaining, stageProgress) => {
+        setWaveNumber(wave);
+        setEnemiesRemaining(remaining);
+        setProgress(stageProgress);
+      },
       onPowerUpActive: (list) => setActivePowerUps(list),
       onGameOver: (finalScore, finalCoins, xpEarned) => {
         setIsPlaying(false);
@@ -253,7 +259,7 @@ export default function App() {
           setTimeout(() => setLevelUpAlert(null), 4500);
         }
 
-        // Notify multiplayer server if racing
+        // Notify multiplayer opponents when the five-wave combat challenge is cleared.
         const socket = wsRef.current;
         if (isMultiplayerMatchRef.current && socket && socket.readyState === WebSocket.OPEN) {
           socket.send(JSON.stringify({
@@ -328,14 +334,12 @@ export default function App() {
             case 'ROOM_JOINED': {
               setRoom(payload.room);
               setYourId(payload.yourId);
-              setRemotePlayersList(payload.room.players);
               setMultiplayerError(null);
               break;
             }
 
             case 'ROOM_UPDATE': {
               setRoom(payload.room);
-              setRemotePlayersList(payload.room.players);
               break;
             }
 
@@ -464,8 +468,10 @@ export default function App() {
     dash: () => {
       if (engineRef.current) engineRef.current.triggerDash();
     },
-    attack: () => {
-      if (engineRef.current) engineRef.current.triggerShoot();
+    attack: (active: boolean) => {
+      if (!engineRef.current) return;
+      engineRef.current.touchInput.attack = active;
+      if (active) engineRef.current.triggerShoot();
     },
     powerup: () => {
       if (engineRef.current) engineRef.current.triggerInventoryPowerup();
@@ -486,6 +492,35 @@ export default function App() {
     setIsPaused(nextPaused);
     if (engineRef.current) {
       engineRef.current.setPaused(nextPaused);
+    }
+  };
+
+  const handleLogout = () => {
+    const socket = wsRef.current;
+    if (socket && socket.readyState === WebSocket.OPEN && room) {
+      socket.send(JSON.stringify({ type: 'LEAVE_ROOM' }));
+    }
+    engineRef.current?.stop();
+    setIsPlaying(false);
+    setIsPaused(false);
+    setIsMultiplayerMatch(false);
+    setRoom(null);
+    setYourId(null);
+    setShowAuthModal(false);
+    setShowLeaderboardModal(false);
+    setShowMultiplayerModal(false);
+    setShowCharacterModal(false);
+    setShowUpgradeModal(false);
+    setShowGameOverModal(false);
+    setShowVictoryModal(false);
+
+    const loggedOut = { ...statsRef.current, isLoggedIn: false };
+    setStats(loggedOut);
+    statsRef.current = loggedOut;
+    try {
+      localStorage.setItem('neon_dash_player_stats', JSON.stringify(loggedOut));
+    } catch {
+      // Keep logout available even if browser storage is blocked.
     }
   };
 
@@ -531,7 +566,6 @@ export default function App() {
       };
       setRoom(localRoom);
       setYourId(myId);
-      setRemotePlayersList([]);
     }
   };
 
@@ -615,7 +649,6 @@ export default function App() {
 
       setRoom(localRoom);
       setYourId(myId);
-      setRemotePlayersList([botPlayer]);
       setMatchCountdown(3);
 
       let count = 3;
@@ -749,6 +782,7 @@ export default function App() {
             saveStats(newStats);
           }}
           initialStats={INITIAL_STATS}
+          guestStats={stats}
         />
       )}
 
@@ -762,12 +796,13 @@ export default function App() {
             progress={progress}
             stageName={activeStageConfig.name}
             stageNumber={currentStage}
+            waveNumber={waveNumber}
+            enemiesRemaining={enemiesRemaining}
             activePowerUps={activePowerUps}
             isMuted={isMuted}
             onToggleMute={handleToggleMute}
             onPause={handleTogglePause}
             isMultiplayer={isMultiplayerMatch}
-            remotePlayers={remotePlayersList}
             onSendEmote={handleSendEmote}
             equippedGadget={stats.equippedGadget}
           />
@@ -813,18 +848,13 @@ export default function App() {
               </button>
 
               <button
-                onClick={() => {
-                  const loggedOut = { ...stats, isLoggedIn: false };
-                  setStats(loggedOut);
-                  try {
-                    localStorage.setItem('neon_dash_player_stats', JSON.stringify(loggedOut));
-                  } catch {}
-                }}
+                onClick={handleLogout}
                 className="p-2 sm:px-2.5 sm:py-2 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-slate-800 hover:border-rose-500/50 text-slate-400 hover:text-rose-400 text-[10px] font-mono transition-colors cursor-pointer flex items-center gap-1 shadow-md"
-                title="Log out or switch pilot identity"
+                aria-label="Log out"
+                title="Log out and return to pilot sign-in"
               >
                 <LogOut className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">SWITCH</span>
+                <span className="hidden sm:inline">LOG OUT</span>
               </button>
             </div>
 
@@ -851,7 +881,7 @@ export default function App() {
           <div className="my-auto max-w-lg mx-auto text-center py-4">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-cyan-500/30 bg-cyan-950/40 text-cyan-400 text-xs tracking-wider uppercase font-mono mb-3">
               <Zap className="w-3.5 h-3.5 animate-pulse" />
-              CYBERNETIC SPEED RUNNER • 10 ESCALATING SECTORS
+              FIVE-WAVE COMBAT CAMPAIGN • MANUAL CONTROLS
             </div>
 
             <h1 className="text-4xl sm:text-6xl font-black tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-teal-200 to-fuchsia-400 drop-shadow-[0_0_30px_rgba(0,245,212,0.3)]">
@@ -859,7 +889,7 @@ export default function App() {
             </h1>
 
             <p className="text-xs sm:text-sm text-slate-300 font-mono mt-2 max-w-md mx-auto">
-              Sprint through 10 escalating cyberpunk sectors, duel mini-bosses, annihilate the Stage 10 Extreme Colossus, and race rivals in real-time!
+              Clear five escalating enemy waves in every sector. Stage 5 ends with a separate mini-boss duel; Stage 10 closes on the 5× Colossus. Move and fire manually—there is no finish line.
             </p>
 
             {/* Launch Buttons */}
@@ -874,7 +904,11 @@ export default function App() {
                 }`}
               >
                 <Play className="w-5 h-5 fill-current" />
-                {currentStage === 10 ? 'CHALLENGE STAGE 10 EXTREME BOSS' : `PLAY STAGE ${currentStage}`}
+                {currentStage === 10
+                  ? 'CLEAR 5 WAVES • FACE 5X BOSS'
+                  : currentStage === 5
+                    ? 'CLEAR 5 WAVES • MINI-BOSS NEXT'
+                    : `CLEAR STAGE ${currentStage} • 5 WAVES`}
               </button>
 
               {/* Competitive Multiplayer Versus */}
@@ -929,7 +963,13 @@ export default function App() {
                         {s.stage === 10 ? 'S10 ★' : `S0${s.stage}`}
                       </span>
                       <span className="text-[8px] truncate max-w-full px-0.5 uppercase font-mono font-bold">
-                        {isUnlocked ? (s.isExtremeBoss ? 'EXTREME' : 'BOSS') : 'LOCKED'}
+                        {isUnlocked
+                          ? s.isExtremeBoss
+                            ? '5X BOSS'
+                            : s.bossPresent
+                            ? 'MINI BOSS'
+                            : '5 WAVES'
+                          : 'LOCKED'}
                       </span>
                     </button>
                   );
@@ -1014,6 +1054,13 @@ export default function App() {
                 className="w-full py-2.5 rounded-xl font-bold text-xs uppercase tracking-wider text-slate-400 hover:text-white bg-transparent transition-colors cursor-pointer"
               >
                 ABORT TO MENU
+              </button>
+              <button
+                onClick={handleLogout}
+                className="w-full py-2.5 rounded-xl font-bold text-xs uppercase tracking-wider text-rose-300 hover:text-white bg-rose-950/50 hover:bg-rose-900/70 border border-rose-500/30 transition-colors cursor-pointer flex items-center justify-center gap-2"
+              >
+                <LogOut className="w-4 h-4" />
+                LOG OUT
               </button>
             </div>
           </div>

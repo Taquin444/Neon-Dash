@@ -61,8 +61,8 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
     try {
       if (navigator.share) {
         await navigator.share({
-          title: 'Join my Neon Dash Race!',
-          text: `Compete against me in Neon Dash Cyber Runner! Room code: ${room.code}`,
+          title: 'Join my Neon Dash Combat Match!',
+          text: `Clear five enemy waves against me in Neon Dash! Room code: ${room.code}`,
           url: getInviteLink(),
         });
       } else {
@@ -97,7 +97,7 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
               VERSUS MULTIPLAYER
             </h2>
             <p className="text-xs text-slate-400 font-mono">
-              Live Real-Time Head-to-Head Cyber Racing
+              Live Head-to-Head Five-Wave Combat
             </p>
           </div>
         </div>
@@ -117,7 +117,7 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
             <div className="text-8xl font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-fuchsia-400 animate-ping">
               {countdown}
             </div>
-            <p className="text-xs text-slate-400 mt-4">Get ready to race!</p>
+            <p className="text-xs text-slate-400 mt-4">Get ready to clear five waves!</p>
           </div>
         )}
 
@@ -129,7 +129,7 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
               <div>
                 <h3 className="font-bold text-white text-sm">Quick Matchmaking</h3>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Instant matchup with waiting cyber racers
+                  Join another pilot for a five-wave sector challenge
                 </p>
               </div>
               <button
@@ -154,7 +154,7 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
               {/* Stage Select */}
               <div>
                 <label className="block text-[11px] font-mono text-slate-400 mb-1">
-                  RACE TRACK (STAGE)
+                  COMBAT SECTOR (STAGE)
                 </label>
                 <select
                   value={selectedStage}
@@ -163,7 +163,7 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
                 >
                   {STAGES.map((s) => (
                     <option key={s.stage} value={s.stage}>
-                      Stage {s.stage}: {s.name} ({s.trackLength}m)
+                      Stage {s.stage}: {s.name} (5 waves{s.bossPresent ? ` · ${s.isExtremeBoss ? '5X BOSS' : 'MINI-BOSS'}` : ''})
                     </option>
                   ))}
                 </select>
@@ -248,7 +248,7 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
             {/* Players List */}
             <div className="space-y-2">
               <div className="flex justify-between items-center text-xs font-mono text-slate-400 px-1">
-                <span>RACERS IN LOBBY ({room.players.length}/4)</span>
+                <span>PILOTS IN LOBBY ({room.players.length}/4)</span>
                 <span>STATUS</span>
               </div>
 
@@ -318,7 +318,7 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
                   className="flex-1 py-3 px-4 rounded-xl font-bold text-xs uppercase tracking-wider text-slate-950 bg-gradient-to-r from-cyan-400 to-fuchsia-400 hover:brightness-110 active:scale-98 transition-all flex items-center justify-center gap-2 cursor-pointer shadow-[0_0_20px_rgba(0,245,212,0.4)]"
                 >
                   <Play className="w-4 h-4 fill-current" />
-                  START RACE ({room.players.length} RACERS)
+                  START MATCH ({room.players.length} PILOTS)
                 </button>
               ) : (
                 <button

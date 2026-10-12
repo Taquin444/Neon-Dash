@@ -7,12 +7,12 @@ interface LoadingScreenProps {
 }
 
 const TIPS = [
-  'Slide (S / Down) underneath high laser gates to slip through without taking damage.',
-  'Double jump (Space / W) to reach elevated tracks and collect secret cyan gems.',
-  'Sonic Turbo power-up smashes right through drones and ground spikes.',
-  'Plasma Aegis shields you from a fatal hit or laser beam.',
-  'In multiplayer mode, use EMP and Blasters to overtake your rivals!',
-  'Upgrade power-up durations in the Cyber Armory using collected energy coins.',
+  'Move manually with A / D or the arrow keys. Release both directions to stop.',
+  'Hold K / F or hold the touch fire button to shoot; shots aim toward the nearest hostile.',
+  'Clear all five waves, then defeat the Stage 5 mini-boss or the 5× Stage 10 Colossus.',
+  'Double jump with Space / W to dodge incoming hostile fire and reach elevated routes.',
+  'Slide with S / Down under laser gates, or dash with Shift / J through danger.',
+  'Upgrade weapons in the Cyber Armory to cut down the Stage 10 boss faster.',
 ];
 
 export const LoadingScreen: React.FC<LoadingScreenProps> = ({ onStart }) => {
@@ -82,19 +82,19 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({ onStart }) => {
           NEON DASH
         </h1>
         <p className="text-sm font-mono tracking-widest text-slate-400 mt-2 uppercase">
-          Cyber Multiplayer Runner
+          Manual Neon Combat • Five Waves Per Sector
         </p>
 
         {/* Feature badges */}
         <div className="flex flex-wrap items-center justify-center gap-2 mt-5 text-xs text-slate-300">
           <span className="flex items-center gap-1 bg-slate-900/80 px-2.5 py-1 rounded border border-slate-800">
-            <Crosshair className="w-3 h-3 text-cyan-400" /> Real-time Races
+            <Crosshair className="w-3 h-3 text-cyan-400" /> Manual Combat
           </span>
           <span className="flex items-center gap-1 bg-slate-900/80 px-2.5 py-1 rounded border border-slate-800">
             <Shield className="w-3 h-3 text-fuchsia-400" /> Power-Up Arsenal
           </span>
           <span className="flex items-center gap-1 bg-slate-900/80 px-2.5 py-1 rounded border border-slate-800">
-            <Zap className="w-3 h-3 text-amber-400" /> 5 Escalating Stages
+            <Zap className="w-3 h-3 text-amber-400" /> 5 Waves / Stage
           </span>
         </div>
       </div>
