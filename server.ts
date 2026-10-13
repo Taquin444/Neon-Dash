@@ -40,6 +40,7 @@ if (!fs.existsSync(dataDir)) {
 
 const usersFilePath = path.join(dataDir, 'users.json');
 const leaderboardFilePath = path.join(dataDir, 'leaderboard.json');
+const arenaAgentFilePath = path.join(dataDir, 'arena-agent.json');
 
 // Real-time leaderboard: ONLY actual players who play the game
 let leaderboard: LeaderboardEntry[] = [];
@@ -90,6 +91,17 @@ function persistUsers() {
 // REST endpoints
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() });
+});
+
+// Stored reference to the Arena agent supplied by the project owner.
+app.get('/api/arena-agent', (_req, res) => {
+  try {
+    const source = JSON.parse(fs.readFileSync(arenaAgentFilePath, 'utf-8'));
+    res.json({ success: true, ...source });
+  } catch (err) {
+    console.error('Error reading Arena agent reference:', err);
+    res.status(500).json({ success: false, error: 'Arena agent reference is unavailable.' });
+  }
 });
 
 // Real-Time Leaderboard endpoint
