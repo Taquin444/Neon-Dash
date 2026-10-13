@@ -2,8 +2,8 @@
   "source": {
     "provider": "Arena.ai",
     "type": "agent",
-    "url": "https://arena.ai/agent/01a132ed-29d6-7f2a-aad1-239caacf2a0e",
-    "sessionId": "01a132ed-29d6-7f2a-aad1-239caacf2a0e",
+    "url": "https://arena.ai/agent/01a132fd-09e6-70cd-a7c9-63f801853fc5",
+    "sessionId": "01a132fd-09e6-70cd-a7c9-63f801853fc5",
     "storedAt": "2026-10-13",
     "note": "Reference supplied by the project owner. The linked agent's contents are not duplicated here."
   },
@@ -16,6 +16,11 @@
     {
       "url": "https://arena.ai/agent/01a132ed-29d6-7f2a-aad1-239caacf2a0e",
       "sessionId": "01a132ed-29d6-7f2a-aad1-239caacf2a0e",
+      "storedAt": "2026-10-13"
+    },
+    {
+      "url": "https://arena.ai/agent/01a132fd-09e6-70cd-a7c9-63f801853fc5",
+      "sessionId": "01a132fd-09e6-70cd-a7c9-63f801853fc5",
       "storedAt": "2026-10-13"
     }
   ]
